@@ -70,3 +70,42 @@ export async function updateEquipmentUnit(id, payload) {
   if (error) throw error;
   return data;
 }
+
+export async function getEquipmentUnitsWithProcurement(filters = {}) {
+  let query = supabase
+    .from('equipment_units')
+    .select(`
+      *,
+      equipment_types ( name, category ),
+      procurements ( procurement_id, title, type, lease_start_date, lease_end_date, lease_monthly_kwd )
+    `)
+    .order('equipment_id');
+
+  if (filters.status)  query = query.eq('status', filters.status);
+  if (filters.type_id) query = query.eq('type_id', filters.type_id);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Get available equipment excluding already-dispatched ones
+export async function getDispatchableEquipment(excludeIds = []) {
+  let query = supabase
+    .from('equipment_units')
+    .select(`
+      equipment_id, serial_number, capacity, status, location,
+      daily_rate_kwd, type_id,
+      equipment_types ( name, type_id )
+    `)
+    .eq('status', 'Available')
+    .order('type_id');
+
+  if (excludeIds.length > 0) {
+    query = query.not('equipment_id', 'in', `(${excludeIds.join(',')})`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
+}

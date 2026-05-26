@@ -159,3 +159,14 @@ export async function getEquipmentStockByType() {
   });
   return map;
 }
+
+export async function deleteQuotation(id) {
+  // Only allow deleting drafts
+  const { data: q } = await supabase
+    .from('quotations').select('status').eq('quotation_id', id).single();
+  if (q?.status !== 'Draft') throw new Error('Only Draft quotations can be deleted');
+
+  const { error } = await supabase
+    .from('quotations').delete().eq('quotation_id', id);
+  if (error) throw error;
+}

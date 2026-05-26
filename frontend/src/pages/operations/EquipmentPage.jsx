@@ -1,77 +1,80 @@
-import { useEffect, useState, useCallback } from 'react';
-import { getEquipmentUnits, getEquipmentTypes, createEquipmentUnit, updateEquipmentUnit } from '../../api/equipment';
+import { useEffect, useCallback, useState } from 'react';
+import { getEquipmentUnitsWithProcurement, getEquipmentTypes, createEquipmentUnit, updateEquipmentUnit } from '../../api/equipment';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
+import { useAppStore } from '../../store/useAppStore';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import { Plus, Search, Package, RefreshCw, X, Loader2 } from 'lucide-react';
+import { format } from 'date-fns';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const ALL_STATUSES = ['Available','Reserved','Dispatched','Maintenance','Retired'];
 
-const STATUS_COLORS = {
-  Available:   'bg-green-50 text-green-700 ring-green-200',
-  Reserved:    'bg-yellow-50 text-yellow-700 ring-yellow-200',
-  Dispatched:  'bg-blue-50 text-blue-700 ring-blue-200',
-  Maintenance: 'bg-red-50 text-red-700 ring-red-200',
-  Retired:     'bg-gray-100 text-gray-500 ring-gray-200',
+const STATUS_RING = {
+  Available:   'ring-green-300 bg-green-50 text-green-700',
+  Reserved:    'ring-yellow-300 bg-yellow-50 text-yellow-700',
+  Dispatched:  'ring-blue-300 bg-blue-50 text-blue-700',
+  Maintenance: 'ring-red-300 bg-red-50 text-red-700',
+  Retired:     'ring-gray-300 bg-gray-50 text-gray-500',
 };
 
 export default function EquipmentPage() {
   const { role } = useAuth();
 
-  // allUnits = full unfiltered list (for status counts)
-  const [allUnits,     setAllUnits]     = useState([]);
-  const [types,        setTypes]        = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [search,       setSearch]       = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [typeFilter,   setTypeFilter]   = useState('All');
-  const [showModal,    setShowModal]    = useState(false);
-  const [selected,     setSelected]     = useState(null);
-  const [formLoading,  setFormLoading]  = useState(false);
+  const {
+    equipmentUnits, equipmentTypes, equipmentLoaded, equipmentFilters,
+    setEquipmentUnits, setEquipmentTypes, setEquipmentFilters, clearEquipmentCache,
+  } = useAppStore();
+
+  const [loading,     setLoading]     = useState(!equipmentLoaded);
+  const [showModal,   setShowModal]   = useState(false);
+  const [selected,    setSelected]    = useState(null);
+  const [formLoading, setFormLoading] = useState(false);
   const [form, setForm] = useState({
     type_id:'', serial_number:'', capacity:'', status:'Available',
-    location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:''
+    location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:'',
   });
 
+  const { search, status: statusFilter, typeId: typeFilter } = equipmentFilters;
   const canWrite = hasPermission(role, 'equipment_create');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (equipmentLoaded && !force) return;
     setLoading(true);
     try {
       const [u, t] = await Promise.all([
-        getEquipmentUnits(), // always load ALL — we filter client-side
+        getEquipmentUnitsWithProcurement(),
         getEquipmentTypes(),
       ]);
-      setAllUnits(u);
-      setTypes(t);
+      setEquipmentUnits(u);
+      setEquipmentTypes(t);
     } catch { toast.error('Failed to load equipment'); }
     finally { setLoading(false); }
-  }, []);
+  }, [equipmentLoaded, setEquipmentUnits, setEquipmentTypes]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const ch = supabase.channel('equipment-page')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'equipment_units' }, load)
+    const ch = supabase.channel('equipment-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'equipment_units' }, () => {
+        clearEquipmentCache(); load(true);
+      })
       .subscribe();
     return () => ch.unsubscribe();
-  }, [load]);
+  }, [clearEquipmentCache, load]);
 
-  // Status counts always from full list
+  // Status counts always from ALL units
   const statusCounts = ALL_STATUSES.reduce((acc, s) => {
-    acc[s] = allUnits.filter(u => u.status === s).length;
+    acc[s] = equipmentUnits.filter(u => u.status === s).length;
     return acc;
   }, {});
 
-  // Client-side filtering
-  const filtered = allUnits.filter(u => {
-    const matchStatus = statusFilter === 'All' || u.status === statusFilter;
-    const matchType   = typeFilter   === 'All' || u.type_id === typeFilter;
+  // Client-side filter
+  const filtered = equipmentUnits.filter(u => {
     const q = search.toLowerCase();
     const matchSearch = !q ||
       u.equipment_types?.name?.toLowerCase().includes(q) ||
@@ -80,30 +83,30 @@ export default function EquipmentPage() {
       u.location?.toLowerCase().includes(q) ||
       u.capacity?.toLowerCase().includes(q) ||
       u.status?.toLowerCase().includes(q) ||
-      String(u.daily_rate_kwd)?.includes(q) ||
-      u.equipment_types?.category?.toLowerCase().includes(q);
-    return matchStatus && matchType && matchSearch;
+      u.equipment_types?.category?.toLowerCase().includes(q) ||
+      String(u.daily_rate_kwd)?.includes(q);
+
+    const matchStatus = statusFilter === 'All' || u.status === statusFilter;
+    const matchType   = typeFilter   === 'All' || u.type_id === typeFilter;
+
+    return matchSearch && matchStatus && matchType;
   });
+
+  const hasActiveFilters = statusFilter !== 'All' || typeFilter !== 'All' || search;
 
   const openAdd = () => {
     setForm({ type_id:'', serial_number:'', capacity:'', status:'Available', location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:'' });
-    setSelected(null);
-    setShowModal(true);
+    setSelected(null); setShowModal(true);
   };
 
   const openEdit = (unit) => {
     setForm({
-      type_id: unit.type_id,
-      serial_number: unit.serial_number ?? '',
-      capacity: unit.capacity ?? '',
-      status: unit.status,
-      location: unit.location ?? '',
-      daily_rate_kwd: unit.daily_rate_kwd,
-      year_of_manufacture: unit.year_of_manufacture ?? '',
-      notes: unit.notes ?? '',
+      type_id: unit.type_id, serial_number: unit.serial_number??'',
+      capacity: unit.capacity??'', status: unit.status,
+      location: unit.location??'', daily_rate_kwd: unit.daily_rate_kwd,
+      year_of_manufacture: unit.year_of_manufacture??'', notes: unit.notes??'',
     });
-    setSelected(unit);
-    setShowModal(true);
+    setSelected(unit); setShowModal(true);
   };
 
   const handleSave = async (e) => {
@@ -120,8 +123,8 @@ export default function EquipmentPage() {
         toast.success('Equipment unit added');
       }
       setShowModal(false);
-      load();
-    } catch (err) { toast.error(err.message || 'Failed to save');
+      clearEquipmentCache(); load(true);
+    } catch (err) { toast.error(err.message || 'Failed');
     } finally { setFormLoading(false); }
   };
 
@@ -129,11 +132,10 @@ export default function EquipmentPage() {
     try {
       await updateEquipmentUnit(unitId, { status: newStatus });
       toast.success('Status updated');
-      load();
+      // Optimistic local update
+      setEquipmentUnits(equipmentUnits.map(u => u.equipment_id === unitId ? { ...u, status: newStatus } : u));
     } catch { toast.error('Failed to update status'); }
   };
-
-  const toggleStatusFilter = (s) => setStatusFilter(prev => prev === s ? 'All' : s);
 
   return (
     <div className="space-y-4">
@@ -141,27 +143,23 @@ export default function EquipmentPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Equipment Fleet</h2>
-          <p className="text-sm text-gray-400">{allUnits.length} total · {filtered.length} shown</p>
+          <p className="text-sm text-gray-400">{filtered.length} of {equipmentUnits.length} shown</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={load} className="btn-secondary p-2"><RefreshCw size={16} /></button>
-          {canWrite && (
-            <button onClick={openAdd} className="btn-primary flex items-center gap-2">
-              <Plus size={16} /> Add Unit
-            </button>
-          )}
+          <button onClick={() => { clearEquipmentCache(); load(true); }} className="btn-secondary p-2"><RefreshCw size={16} /></button>
+          {canWrite && <button onClick={openAdd} className="btn-primary flex items-center gap-2"><Plus size={16} /> Add Unit</button>}
         </div>
       </div>
 
-      {/* Status summary cards — counts from allUnits, not filtered */}
+      {/* Status summary cards */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
         {ALL_STATUSES.map(s => (
           <button
             key={s}
-            onClick={() => toggleStatusFilter(s)}
+            onClick={() => setEquipmentFilters({ status: statusFilter === s ? 'All' : s })}
             className={clsx(
-              'card p-3 text-center transition-all ring-0',
-              statusFilter === s ? `ring-2 ${STATUS_COLORS[s]}` : 'hover:shadow-md'
+              'card p-3 text-center transition-all ring-0 hover:shadow-md',
+              statusFilter === s && `ring-2 ${STATUS_RING[s]}`
             )}
           >
             <p className="text-2xl font-bold text-gray-800">{statusCounts[s]}</p>
@@ -171,29 +169,41 @@ export default function EquipmentPage() {
       </div>
 
       {/* Filters */}
-      <div className="card p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            className="input pl-9"
-            placeholder="Search by type, ID, serial, capacity, location, status…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="input pl-9"
+              placeholder="Search by type, ID, serial, capacity, location, category…"
+              value={search}
+              onChange={e => setEquipmentFilters({ search: e.target.value })}
+            />
+            {search && (
+              <button onClick={() => setEquipmentFilters({ search: '' })} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <select className="input w-48" value={typeFilter}
+            onChange={e => setEquipmentFilters({ typeId: e.target.value })}>
+            <option value="All">All Types</option>
+            {equipmentTypes.map(t => <option key={t.type_id} value={t.type_id}>{t.name}</option>)}
+          </select>
+          <select className="input w-40" value={statusFilter}
+            onChange={e => setEquipmentFilters({ status: e.target.value })}>
+            <option value="All">All Statuses</option>
+            {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+          {hasActiveFilters && (
+            <button
+              onClick={() => setEquipmentFilters({ search:'', status:'All', typeId:'All' })}
+              className="btn-secondary text-xs px-3 whitespace-nowrap"
+            >
+              Clear
+            </button>
+          )}
         </div>
-        <select className="input w-44" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-          <option value="All">All Types</option>
-          {types.map(t => <option key={t.type_id} value={t.type_id}>{t.name}</option>)}
-        </select>
-        <select className="input w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="All">All Statuses</option>
-          {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
-        </select>
-        {(statusFilter !== 'All' || typeFilter !== 'All' || search) && (
-          <button onClick={() => { setStatusFilter('All'); setTypeFilter('All'); setSearch(''); }} className="btn-secondary text-xs px-3">
-            Clear
-          </button>
-        )}
       </div>
 
       {loading ? <LoadingSpinner fullscreen={false} /> : filtered.length === 0 ? (
@@ -211,7 +221,9 @@ export default function EquipmentPage() {
                     <th className="text-left px-5 py-3">Serial</th>
                     <th className="text-left px-5 py-3">Capacity</th>
                     <th className="text-left px-5 py-3">Location</th>
-                    <th className="text-left px-5 py-3">Rate/Day (KWD)</th>
+                    <th className="text-left px-5 py-3">Rate/Day</th>
+                    <th className="text-left px-5 py-3">Source</th>
+                    <th className="text-left px-5 py-3">Return Date</th>
                     <th className="text-left px-5 py-3">Status</th>
                     {canWrite && <th className="text-left px-5 py-3">Actions</th>}
                   </tr>
@@ -227,25 +239,49 @@ export default function EquipmentPage() {
                       <td className="px-5 py-3 text-gray-500 text-xs">{u.serial_number ?? '—'}</td>
                       <td className="px-5 py-3 text-gray-600">{u.capacity ?? '—'}</td>
                       <td className="px-5 py-3 text-gray-500 text-xs">{u.location ?? '—'}</td>
-                      <td className="px-5 py-3 font-medium text-gray-700">{Number(u.daily_rate_kwd).toLocaleString()}</td>
+                      <td className="px-5 py-3 font-medium text-gray-700">
+                        KWD {Number(u.daily_rate_kwd).toLocaleString()}
+                      </td>
+                      <td className="px-5 py-3 text-xs">
+                        {u.procurement_id ? (
+                          <div>
+                            <span className={clsx('badge border text-xs',
+                              u.procurement_type === 'Lease'
+                                ? 'bg-purple-50 text-purple-700 border-purple-100'
+                                : 'bg-blue-50 text-blue-700 border-blue-100'
+                            )}>
+                              {u.procurement_type ?? 'Purchase'}
+                            </span>
+                            {u.procurement_type === 'Lease' && u.lease_end_date && (
+                              <p className="text-gray-400 mt-0.5 text-xs">
+                                Until {format(new Date(u.lease_end_date), 'dd MMM yyyy')}
+                              </p>
+                            )}
+                          </div>
+                        ) : <span className="text-gray-300">Own fleet</span>}
+                      </td>
+                      <td className="px-5 py-3 text-xs">
+                        {u.expected_return_date ? (
+                          <span className="text-orange-600 font-medium">
+                            {format(new Date(u.expected_return_date), 'dd MMM yyyy')}
+                          </span>
+                        ) : u.status === 'Available' ? (
+                          <span className="text-green-500 text-xs">In yard</span>
+                        ) : '—'}
+                      </td>
                       <td className="px-5 py-3"><StatusBadge status={u.status} /></td>
                       {canWrite && (
                         <td className="px-5 py-3">
                           <div className="flex items-center gap-2">
                             <select
-                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-white"
                               value={u.status}
                               onChange={e => handleStatusChange(u.equipment_id, e.target.value)}
                               onClick={e => e.stopPropagation()}
                             >
                               {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
                             </select>
-                            <button
-                              onClick={() => openEdit(u)}
-                              className="text-xs text-primary-500 hover:underline"
-                            >
-                              Edit
-                            </button>
+                            <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline">Edit</button>
                           </div>
                         </td>
                       )}
@@ -259,17 +295,25 @@ export default function EquipmentPage() {
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
             {filtered.map(u => (
-              <div
-                key={u.equipment_id}
-                className="card p-4 cursor-pointer active:scale-[0.99] transition-transform"
-                onClick={() => canWrite && openEdit(u)}
-              >
+              <div key={u.equipment_id} className="card p-4" onClick={() => canWrite && openEdit(u)}>
                 <div className="flex justify-between items-start mb-1">
                   <p className="font-medium text-gray-800">{u.equipment_types?.name}</p>
                   <StatusBadge status={u.status} />
                 </div>
                 <p className="text-xs text-gray-400">{u.equipment_id} · {u.serial_number ?? '—'} · {u.capacity}</p>
                 <p className="text-xs text-gray-500 mt-1">{u.location ?? '—'} · KWD {Number(u.daily_rate_kwd).toLocaleString()}/day</p>
+                {u.expected_return_date && (
+                  <p className="text-xs text-orange-600 mt-1 font-medium">
+                    Return: {format(new Date(u.expected_return_date), 'dd MMM yyyy')}
+                  </p>
+                )}
+                {u.procurement_id && (
+                  <span className={clsx('mt-1 inline-block badge border text-xs',
+                    u.procurement_type === 'Lease' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                  )}>
+                    {u.procurement_type ?? 'Purchase'}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -289,13 +333,13 @@ export default function EquipmentPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Equipment Type *</label>
                 <select className="input" value={form.type_id} onChange={e => setForm(f => ({ ...f, type_id: e.target.value }))} required>
                   <option value="">Select type…</option>
-                  {types.map(t => <option key={t.type_id} value={t.type_id}>{t.name}</option>)}
+                  {equipmentTypes.map(t => <option key={t.type_id} value={t.type_id}>{t.name}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Serial Number</label>
-                  <input className="input" value={form.serial_number} onChange={e => setForm(f => ({ ...f, serial_number: e.target.value }))} placeholder="e.g. ATC-005" />
+                  <input className="input" value={form.serial_number} onChange={e => setForm(f => ({ ...f, serial_number: e.target.value }))} placeholder="e.g. FLT-010" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Capacity</label>
