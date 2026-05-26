@@ -1,22 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseUrl     = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables. Check your .env file.');
-}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
+    autoRefreshToken:    true,
+    persistSession:      true,
+    detectSessionInUrl:  true,
+    storageKey:          'kw-ops-auth',
+    storage:             window.localStorage,
   },
   realtime: {
-    params: {
-      eventsPerSecond: 10,
-    },
+    params: { eventsPerSecond: 10 },
+  },
+  global: {
+    headers: { 'x-application-name': 'kw-ops-erp' },
   },
 });
 

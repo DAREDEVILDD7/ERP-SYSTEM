@@ -8,21 +8,35 @@ import EmptyState from '../../components/common/EmptyState';
 import { Plus, Search, Package, RefreshCw, X, Loader2 } from 'lucide-react';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
+import clsx from 'clsx';
 
-const STATUSES = ['All','Available','Reserved','Dispatched','Maintenance','Retired'];
-const EQ_STATUSES = ['Available','Reserved','Dispatched','Maintenance','Retired'];
+const ALL_STATUSES = ['Available','Reserved','Dispatched','Maintenance','Retired'];
+
+const STATUS_COLORS = {
+  Available:   'bg-green-50 text-green-700 ring-green-200',
+  Reserved:    'bg-yellow-50 text-yellow-700 ring-yellow-200',
+  Dispatched:  'bg-blue-50 text-blue-700 ring-blue-200',
+  Maintenance: 'bg-red-50 text-red-700 ring-red-200',
+  Retired:     'bg-gray-100 text-gray-500 ring-gray-200',
+};
 
 export default function EquipmentPage() {
   const { role } = useAuth();
-  const [units,    setUnits]    = useState([]);
-  const [types,    setTypes]    = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [search,   setSearch]   = useState('');
+
+  // allUnits = full unfiltered list (for status counts)
+  const [allUnits,     setAllUnits]     = useState([]);
+  const [types,        setTypes]        = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [showModal, setShowModal] = useState(false);
-  const [selected,  setSelected] = useState(null);
-  const [formLoading, setFormLoading] = useState(false);
-  const [form, setForm] = useState({ type_id:'', serial_number:'', capacity:'', status:'Available', location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:'' });
+  const [typeFilter,   setTypeFilter]   = useState('All');
+  const [showModal,    setShowModal]    = useState(false);
+  const [selected,     setSelected]     = useState(null);
+  const [formLoading,  setFormLoading]  = useState(false);
+  const [form, setForm] = useState({
+    type_id:'', serial_number:'', capacity:'', status:'Available',
+    location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:''
+  });
 
   const canWrite = hasPermission(role, 'equipment_create');
 
@@ -30,14 +44,14 @@ export default function EquipmentPage() {
     setLoading(true);
     try {
       const [u, t] = await Promise.all([
-        getEquipmentUnits(statusFilter !== 'All' ? { status: statusFilter } : {}),
+        getEquipmentUnits(), // always load ALL — we filter client-side
         getEquipmentTypes(),
       ]);
-      setUnits(u);
+      setAllUnits(u);
       setTypes(t);
     } catch { toast.error('Failed to load equipment'); }
     finally { setLoading(false); }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -48,21 +62,54 @@ export default function EquipmentPage() {
     return () => ch.unsubscribe();
   }, [load]);
 
-  const filtered = units.filter(u =>
-    !search ||
-    u.equipment_types?.name?.toLowerCase().includes(search.toLowerCase()) ||
-    u.equipment_id?.toLowerCase().includes(search.toLowerCase()) ||
-    u.serial_number?.toLowerCase().includes(search.toLowerCase()) ||
-    u.location?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Status counts always from full list
+  const statusCounts = ALL_STATUSES.reduce((acc, s) => {
+    acc[s] = allUnits.filter(u => u.status === s).length;
+    return acc;
+  }, {});
 
-  const openAdd  = ()    => { setForm({ type_id:'', serial_number:'', capacity:'', status:'Available', location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:'' }); setSelected(null); setShowModal(true); };
-  const openEdit = (unit) => { setForm({ type_id: unit.type_id, serial_number: unit.serial_number??'', capacity: unit.capacity??'', status: unit.status, location: unit.location??'', daily_rate_kwd: unit.daily_rate_kwd, year_of_manufacture: unit.year_of_manufacture??'', notes: unit.notes??'' }); setSelected(unit); setShowModal(true); };
+  // Client-side filtering
+  const filtered = allUnits.filter(u => {
+    const matchStatus = statusFilter === 'All' || u.status === statusFilter;
+    const matchType   = typeFilter   === 'All' || u.type_id === typeFilter;
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      u.equipment_types?.name?.toLowerCase().includes(q) ||
+      u.equipment_id?.toLowerCase().includes(q) ||
+      u.serial_number?.toLowerCase().includes(q) ||
+      u.location?.toLowerCase().includes(q) ||
+      u.capacity?.toLowerCase().includes(q) ||
+      u.status?.toLowerCase().includes(q) ||
+      String(u.daily_rate_kwd)?.includes(q) ||
+      u.equipment_types?.category?.toLowerCase().includes(q);
+    return matchStatus && matchType && matchSearch;
+  });
+
+  const openAdd = () => {
+    setForm({ type_id:'', serial_number:'', capacity:'', status:'Available', location:'', daily_rate_kwd:'', year_of_manufacture:'', notes:'' });
+    setSelected(null);
+    setShowModal(true);
+  };
+
+  const openEdit = (unit) => {
+    setForm({
+      type_id: unit.type_id,
+      serial_number: unit.serial_number ?? '',
+      capacity: unit.capacity ?? '',
+      status: unit.status,
+      location: unit.location ?? '',
+      daily_rate_kwd: unit.daily_rate_kwd,
+      year_of_manufacture: unit.year_of_manufacture ?? '',
+      notes: unit.notes ?? '',
+    });
+    setSelected(unit);
+    setShowModal(true);
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.type_id)         return toast.error('Select equipment type');
-    if (!form.daily_rate_kwd)  return toast.error('Enter daily rate');
+    if (!form.type_id)        return toast.error('Select equipment type');
+    if (!form.daily_rate_kwd) return toast.error('Enter daily rate');
     setFormLoading(true);
     try {
       if (selected) {
@@ -86,95 +133,137 @@ export default function EquipmentPage() {
     } catch { toast.error('Failed to update status'); }
   };
 
-  const statusCount = (s) => units.filter(u => u.status === s).length;
+  const toggleStatusFilter = (s) => setStatusFilter(prev => prev === s ? 'All' : s);
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Equipment Fleet</h2>
-          <p className="text-sm text-gray-400">{units.length} total units</p>
+          <p className="text-sm text-gray-400">{allUnits.length} total · {filtered.length} shown</p>
         </div>
         <div className="flex gap-2">
           <button onClick={load} className="btn-secondary p-2"><RefreshCw size={16} /></button>
-          {canWrite && <button onClick={openAdd} className="btn-primary flex items-center gap-2"><Plus size={16} /> Add Unit</button>}
+          {canWrite && (
+            <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+              <Plus size={16} /> Add Unit
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Status summary cards */}
+      {/* Status summary cards — counts from allUnits, not filtered */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-        {['Available','Reserved','Dispatched','Maintenance','Retired'].map(s => (
+        {ALL_STATUSES.map(s => (
           <button
             key={s}
-            onClick={() => setStatusFilter(statusFilter === s ? 'All' : s)}
-            className={`card p-3 text-center transition-all ${statusFilter === s ? 'ring-2 ring-primary-500' : ''}`}
+            onClick={() => toggleStatusFilter(s)}
+            className={clsx(
+              'card p-3 text-center transition-all ring-0',
+              statusFilter === s ? `ring-2 ${STATUS_COLORS[s]}` : 'hover:shadow-md'
+            )}
           >
-            <p className="text-xl font-bold text-gray-800">{statusCount(s)}</p>
+            <p className="text-2xl font-bold text-gray-800">{statusCounts[s]}</p>
             <p className="text-xs text-gray-400 mt-0.5">{s}</p>
           </button>
         ))}
       </div>
 
       {/* Filters */}
-      <div className="card p-4 flex gap-3">
+      <div className="card p-4 flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input className="input pl-9" placeholder="Search by type, ID, serial, location…" value={search} onChange={e => setSearch(e.target.value)} />
+          <input
+            className="input pl-9"
+            placeholder="Search by type, ID, serial, capacity, location, status…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
-        <select className="input w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          {STATUSES.map(s => <option key={s}>{s}</option>)}
+        <select className="input w-44" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+          <option value="All">All Types</option>
+          {types.map(t => <option key={t.type_id} value={t.type_id}>{t.name}</option>)}
         </select>
+        <select className="input w-40" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="All">All Statuses</option>
+          {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
+        </select>
+        {(statusFilter !== 'All' || typeFilter !== 'All' || search) && (
+          <button onClick={() => { setStatusFilter('All'); setTypeFilter('All'); setSearch(''); }} className="btn-secondary text-xs px-3">
+            Clear
+          </button>
+        )}
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false} /> : filtered.length === 0 ? <EmptyState message="No equipment found" icon={Package} /> : (
+      {loading ? <LoadingSpinner fullscreen={false} /> : filtered.length === 0 ? (
+        <EmptyState message="No equipment matches your search" icon={Package} />
+      ) : (
         <>
           {/* Desktop table */}
           <div className="card hidden md:block overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
-                  <th className="text-left px-5 py-3">ID</th>
-                  <th className="text-left px-5 py-3">Type</th>
-                  <th className="text-left px-5 py-3">Serial</th>
-                  <th className="text-left px-5 py-3">Capacity</th>
-                  <th className="text-left px-5 py-3">Location</th>
-                  <th className="text-left px-5 py-3">Rate/Day (KWD)</th>
-                  <th className="text-left px-5 py-3">Status</th>
-                  {canWrite && <th className="text-left px-5 py-3">Action</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map(u => (
-                  <tr key={u.equipment_id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 font-mono text-xs text-gray-400">{u.equipment_id}</td>
-                    <td className="px-5 py-3 font-medium text-gray-800">{u.equipment_types?.name}</td>
-                    <td className="px-5 py-3 text-gray-500 text-xs">{u.serial_number ?? '—'}</td>
-                    <td className="px-5 py-3 text-gray-600">{u.capacity ?? '—'}</td>
-                    <td className="px-5 py-3 text-gray-500 text-xs">{u.location ?? '—'}</td>
-                    <td className="px-5 py-3 font-medium text-gray-700">{Number(u.daily_rate_kwd).toLocaleString()}</td>
-                    <td className="px-5 py-3"><StatusBadge status={u.status} /></td>
-                    {canWrite && (
-                      <td className="px-5 py-3 flex items-center gap-2">
-                        <select
-                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
-                          value={u.status}
-                          onChange={e => handleStatusChange(u.equipment_id, e.target.value)}
-                        >
-                          {EQ_STATUSES.map(s => <option key={s}>{s}</option>)}
-                        </select>
-                        <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline">Edit</button>
-                      </td>
-                    )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
+                    <th className="text-left px-5 py-3">ID</th>
+                    <th className="text-left px-5 py-3">Type</th>
+                    <th className="text-left px-5 py-3">Serial</th>
+                    <th className="text-left px-5 py-3">Capacity</th>
+                    <th className="text-left px-5 py-3">Location</th>
+                    <th className="text-left px-5 py-3">Rate/Day (KWD)</th>
+                    <th className="text-left px-5 py-3">Status</th>
+                    {canWrite && <th className="text-left px-5 py-3">Actions</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered.map(u => (
+                    <tr key={u.equipment_id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-5 py-3 font-mono text-xs text-gray-400">{u.equipment_id}</td>
+                      <td className="px-5 py-3">
+                        <p className="font-medium text-gray-800">{u.equipment_types?.name}</p>
+                        <p className="text-xs text-gray-400">{u.equipment_types?.category}</p>
+                      </td>
+                      <td className="px-5 py-3 text-gray-500 text-xs">{u.serial_number ?? '—'}</td>
+                      <td className="px-5 py-3 text-gray-600">{u.capacity ?? '—'}</td>
+                      <td className="px-5 py-3 text-gray-500 text-xs">{u.location ?? '—'}</td>
+                      <td className="px-5 py-3 font-medium text-gray-700">{Number(u.daily_rate_kwd).toLocaleString()}</td>
+                      <td className="px-5 py-3"><StatusBadge status={u.status} /></td>
+                      {canWrite && (
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-2">
+                            <select
+                              className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                              value={u.status}
+                              onChange={e => handleStatusChange(u.equipment_id, e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
+                            </select>
+                            <button
+                              onClick={() => openEdit(u)}
+                              className="text-xs text-primary-500 hover:underline"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
             {filtered.map(u => (
-              <div key={u.equipment_id} className="card p-4" onClick={() => canWrite && openEdit(u)}>
+              <div
+                key={u.equipment_id}
+                className="card p-4 cursor-pointer active:scale-[0.99] transition-transform"
+                onClick={() => canWrite && openEdit(u)}
+              >
                 <div className="flex justify-between items-start mb-1">
                   <p className="font-medium text-gray-800">{u.equipment_types?.name}</p>
                   <StatusBadge status={u.status} />
@@ -217,7 +306,7 @@ export default function EquipmentPage() {
                   <input type="number" min="0" step="0.001" className="input" value={form.daily_rate_kwd} onChange={e => setForm(f => ({ ...f, daily_rate_kwd: e.target.value }))} required />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Year of Manufacture</label>
                   <input type="number" className="input" value={form.year_of_manufacture} onChange={e => setForm(f => ({ ...f, year_of_manufacture: e.target.value }))} placeholder="e.g. 2020" />
                 </div>
               </div>
@@ -228,14 +317,14 @@ export default function EquipmentPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                 <select className="input" value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}>
-                  {EQ_STATUSES.map(s => <option key={s}>{s}</option>)}
+                  {ALL_STATUSES.map(s => <option key={s}>{s}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                <textarea className="input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                <textarea className="input resize-y" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
               </div>
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
                 <button type="submit" disabled={formLoading} className="btn-primary flex items-center gap-2">
                   {formLoading && <Loader2 size={14} className="animate-spin" />}
