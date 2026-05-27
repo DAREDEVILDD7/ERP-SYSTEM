@@ -7,7 +7,7 @@ import LoadingSpinner from '../../components/common/LoadingSpinner';
 import EmptyState from '../../components/common/EmptyState';
 import {
   Plus, DollarSign, X, Loader2, RefreshCw,
-  Download, CheckCircle, BarChart2, TrendingUp, TrendingDown,
+  Download, CheckCircle, BarChart2, TrendingUp, TrendingDown, Search,
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
 import { downloadInvoicePDF, downloadZReportPDF } from '../../lib/pdfGenerator';
@@ -15,6 +15,8 @@ import { fetchAdminStats } from '../../api/dashboard';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
+import QuotationDetail from '../../components/quotations/QuotationDetail';
+import { Eye } from 'lucide-react';
 
 const FINANCE_TABS   = ['Customer Invoices', 'Procurement Expenses', 'Assets', 'Z Report'];
 const STATUSES       = ['All','Draft','Sent','Paid','Overdue','Cancelled'];
@@ -27,6 +29,8 @@ export default function InvoicesPage() {
 
   // Tab
   const [finTab, setFinTab] = useState('Customer Invoices');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [viewingQuote, setViewingQuote]   = useState(null);
 
   // Invoices
   const [invoices,     setInvoices]     = useState([]);
@@ -276,77 +280,139 @@ export default function InvoicesPage() {
       {loading ? <LoadingSpinner fullscreen={false} /> : (
         <>
           {/* ── Customer Invoices ── */}
-          {finTab === 'Customer Invoices' && (
-            <>
-              {/* Status filter */}
-              <div className="flex gap-2 overflow-x-auto">
-                {STATUSES.map(s => (
-                  <button key={s} onClick={() => setStatusFilter(s)}
-                    className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-                      statusFilter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
-                    {s}
-                  </button>
+{finTab === 'Customer Invoices' && (
+  <>
+    {/* Invoice-specific search */}
+    <div className="relative">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+      <input className="input pl-9 w-full"
+        placeholder="Search by invoice ID, customer, or quotation ID…"
+        value={invoiceSearch}
+        onChange={e => setInvoiceSearch(e.target.value)}/>
+      {invoiceSearch && (
+        <button onClick={() => setInvoiceSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+          <X size={14}/>
+        </button>
+      )}
+    </div>
+
+    {/* Status filter */}
+    <div className="flex gap-2 overflow-x-auto">
+      {STATUSES.map(s => (
+        <button key={s} onClick={() => setStatusFilter(s)}
+          className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
+            statusFilter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
+          {s}
+        </button>
+      ))}
+    </div>
+
+    {/* Filtered invoices */}
+    {(() => {
+      const q = invoiceSearch.toLowerCase();
+      const filteredInv = invoices.filter(inv =>
+        !q ||
+        inv.invoice_id?.toLowerCase().includes(q) ||
+        inv.customers?.company_name?.toLowerCase().includes(q) ||
+        inv.quotations?.quotation_id?.toLowerCase().includes(q) ||
+        inv.quotations?.requirements?.requirement_summary?.toLowerCase().includes(q)
+      );
+
+      if (filteredInv.length === 0) return <EmptyState message="No invoices found" icon={DollarSign}/>;
+
+      return (
+        <>
+          <div className="card hidden md:block overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
+                  <th className="text-left px-5 py-3">Invoice ID</th>
+                  <th className="text-left px-5 py-3">Customer</th>
+                  <th className="text-left px-5 py-3">Quotation</th>
+                  <th className="text-left px-5 py-3">Issue Date</th>
+                  <th className="text-left px-5 py-3">Due Date</th>
+                  <th className="text-right px-5 py-3">Total (KWD)</th>
+                  <th className="text-left px-5 py-3">Status</th>
+                  <th className="text-left px-5 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filteredInv.map(inv => (
+                  <tr key={inv.invoice_id} className="hover:bg-gray-50">
+                    <td className="px-5 py-3 font-mono text-xs text-gray-400">{inv.invoice_id}</td>
+                    <td className="px-5 py-3">
+                      <p className="font-medium text-gray-800">{inv.customers?.company_name}</p>
+                      {inv.quotations?.requirements?.requirement_summary && (
+                        <p className="text-xs text-gray-400 truncate max-w-xs">{inv.quotations.requirements.requirement_summary}</p>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {inv.quotations ? (
+                        <button
+                          onClick={() => setViewingQuote(inv.quotations.quotation_id)}
+                          className="flex items-center gap-1 text-xs text-primary-600 hover:underline font-mono"
+                        >
+                          <Eye size={12}/> {inv.quotations.quotation_id}
+                        </button>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-5 py-3 text-gray-400 text-xs">{format(new Date(inv.issue_date),'dd MMM yyyy')}</td>
+                    <td className="px-5 py-3 text-gray-400 text-xs">{inv.due_date ? format(new Date(inv.due_date),'dd MMM yyyy') : '—'}</td>
+                    <td className="px-5 py-3 text-right font-semibold text-gray-800">{Number(inv.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</td>
+                    <td className="px-5 py-3"><StatusBadge status={inv.status}/></td>
+                    <td className="px-5 py-3 flex items-center gap-2">
+                      <button onClick={() => downloadInvoicePDF(inv)} className="text-gray-400 hover:text-gray-600"><Download size={15}/></button>
+                      {['Draft','Sent'].includes(inv.status) && (
+                        <button onClick={() => markPaid(inv)} className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1">
+                          <CheckCircle size={12}/> Mark Paid
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="md:hidden space-y-3">
+            {filteredInv.map(inv => (
+              <div key={inv.invoice_id} className="card p-4">
+                <div className="flex justify-between items-start mb-1">
+                  <p className="font-medium text-gray-800">{inv.customers?.company_name}</p>
+                  <StatusBadge status={inv.status}/>
+                </div>
+                <p className="text-xs text-gray-400">{inv.invoice_id}</p>
+                {inv.quotations && (
+                  <button onClick={() => setViewingQuote(inv.quotations.quotation_id)}
+                    className="text-xs text-primary-600 hover:underline flex items-center gap-1 mt-1">
+                    <Eye size={11}/> {inv.quotations.quotation_id}
+                  </button>
+                )}
+                <p className="text-sm font-bold text-gray-800 mt-1">KWD {Number(inv.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</p>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => downloadInvoicePDF(inv)} className="text-xs btn-secondary flex items-center gap-1"><Download size={12}/> PDF</button>
+                  {['Draft','Sent'].includes(inv.status) && <button onClick={() => markPaid(inv)} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg">Mark Paid</button>}
+                </div>
               </div>
+            ))}
+          </div>
+        </>
+      );
+    })()}
 
-              {invoices.length === 0 ? <EmptyState message="No invoices found" icon={DollarSign} /> : (
-                <>
-                  <div className="card hidden md:block overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
-                          <th className="text-left px-5 py-3">Invoice ID</th>
-                          <th className="text-left px-5 py-3">Customer</th>
-                          <th className="text-left px-5 py-3">Issue Date</th>
-                          <th className="text-left px-5 py-3">Due Date</th>
-                          <th className="text-left px-5 py-3">Total (KWD)</th>
-                          <th className="text-left px-5 py-3">Status</th>
-                          <th className="text-left px-5 py-3">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {invoices.map(inv => (
-                          <tr key={inv.invoice_id} className="hover:bg-gray-50">
-                            <td className="px-5 py-3 font-mono text-xs text-gray-400">{inv.invoice_id}</td>
-                            <td className="px-5 py-3 font-medium text-gray-800">{inv.customers?.company_name}</td>
-                            <td className="px-5 py-3 text-gray-400 text-xs">{format(new Date(inv.issue_date),'dd MMM yyyy')}</td>
-                            <td className="px-5 py-3 text-gray-400 text-xs">{inv.due_date ? format(new Date(inv.due_date),'dd MMM yyyy') : '—'}</td>
-                            <td className="px-5 py-3 font-semibold text-gray-800">{Number(inv.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</td>
-                            <td className="px-5 py-3"><StatusBadge status={inv.status} /></td>
-                            <td className="px-5 py-3 flex items-center gap-2">
-                              <button onClick={() => downloadInvoicePDF(inv)} className="text-gray-400 hover:text-gray-600"><Download size={15}/></button>
-                              {['Draft','Sent'].includes(inv.status) && (
-                                <button onClick={() => markPaid(inv)} className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1">
-                                  <CheckCircle size={12}/> Mark Paid
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="md:hidden space-y-3">
-                    {invoices.map(inv => (
-                      <div key={inv.invoice_id} className="card p-4">
-                        <div className="flex justify-between items-start mb-1">
-                          <p className="font-medium text-gray-800">{inv.customers?.company_name}</p>
-                          <StatusBadge status={inv.status}/>
-                        </div>
-                        <p className="text-xs text-gray-400">{inv.invoice_id}</p>
-                        <p className="text-sm font-bold text-gray-800 mt-1">KWD {Number(inv.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</p>
-                        <div className="flex gap-2 mt-2">
-                          <button onClick={() => downloadInvoicePDF(inv)} className="text-xs btn-secondary flex items-center gap-1"><Download size={12}/> PDF</button>
-                          {['Draft','Sent'].includes(inv.status) && <button onClick={() => markPaid(inv)} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg">Mark Paid</button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
-          )}
+    {/* Quotation detail overlay */}
+    {viewingQuote && (
+      <div className="fixed inset-0 z-50 bg-white overflow-y-auto p-4 md:p-6">
+        <QuotationDetail
+          quotationId={viewingQuote}
+          onBack={() => setViewingQuote(null)}
+          canApprove={false}
+          onRefresh={() => {}}
+        />
+      </div>
+    )}
+  </>
+)}
 
           {/* ── Procurement Expenses ── */}
           {finTab === 'Procurement Expenses' && (

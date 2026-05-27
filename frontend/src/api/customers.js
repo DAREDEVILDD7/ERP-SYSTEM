@@ -7,11 +7,15 @@ export async function getCustomers(search = '') {
     .eq('is_active', true)
     .order('company_name');
 
-  if (search) query = query.or(`company_name.ilike.%${search}%,contact_person.ilike.%${search}%`);
+  if (search) {
+    query = query.or(
+      `company_name.ilike.%${search}%,contact_person.ilike.%${search}%,industry.ilike.%${search}%`
+    );
+  }
 
   const { data, error } = await query;
   if (error) throw error;
-  return data;
+  return data ?? [];
 }
 
 export async function getCustomer(id) {
