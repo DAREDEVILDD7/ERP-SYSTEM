@@ -75,23 +75,6 @@ export default function RequirementsPage() {
     return () => channel.unsubscribe();
   }, [clearRequirementsCache, load]);
 
-  const handleStatusUpdate = async (reqId, newStatus) => {
-    try {
-      const { error } = await supabase
-        .from('requirements')
-        .update({ status: newStatus })
-        .eq('requirement_id', reqId);
-      if (error) throw error;
-      toast.success(`Status → "${newStatus}"`);
-      // Update local state without full reload
-      setRequirements(requirements.map(r =>
-        r.requirement_id === reqId ? { ...r, status: newStatus } : r
-      ));
-    } catch {
-      toast.error('Failed to update status');
-    }
-  };
-
   // Client-side filtering
   const filtered = requirements.filter(r => {
     const q = search.toLowerCase();
@@ -137,7 +120,6 @@ export default function RequirementsPage() {
         requirementId={selected}
         onBack={() => setSelected(null)}
         onEdit={(req) => { setSelected(null); setEditTarget(req); }}
-        onStatusChange={handleStatusUpdate}
         canReview={canReview}
       />
     );
@@ -305,17 +287,14 @@ export default function RequirementsPage() {
                     <th className="text-left px-5 py-3">Location</th>
                     <th className="text-left px-5 py-3">Priority</th>
                     <th className="text-left px-5 py-3">Status</th>
-                    <th className="text-left px-5 py-3">Date</th>
-                    {canReview && <th className="text-left px-5 py-3">Quick Update</th>}
+                    <th className="text-left px-5 py-3">Created</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map(r => (
-                    <tr
-                      key={r.requirement_id}
+                    <tr key={r.requirement_id}
                       className="hover:bg-gray-50 transition-colors cursor-pointer"
-                      onClick={() => setSelected(r.requirement_id)}
-                    >
+                      onClick={() => setSelected(r.requirement_id)}>
                       <td className="px-5 py-3 font-mono text-xs text-gray-400 whitespace-nowrap">{r.requirement_id}</td>
                       <td className="px-5 py-3 max-w-xs">
                         <p className="font-medium text-gray-800 truncate">{r.requirement_summary}</p>
@@ -328,23 +307,10 @@ export default function RequirementsPage() {
                           {r.priority ?? 'Normal'}
                         </span>
                       </td>
-                      <td className="px-5 py-3"><StatusBadge status={r.status} /></td>
+                      <td className="px-5 py-3"><StatusBadge status={r.status}/></td>
                       <td className="px-5 py-3 text-gray-400 text-xs whitespace-nowrap">
-                        {format(new Date(r.created_at), 'dd MMM yyyy')}
+                        {format(new Date(r.created_at), 'dd MMM yyyy, HH:mm')}
                       </td>
-                      {canReview && (
-                        <td className="px-5 py-3" onClick={e => e.stopPropagation()}>
-                          <select
-                            className="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500 bg-white"
-                            value={r.status}
-                            onChange={e => handleStatusUpdate(r.requirement_id, e.target.value)}
-                          >
-                            {STATUSES.filter(s => s !== 'All').map(s => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -367,7 +333,7 @@ export default function RequirementsPage() {
                 <div className="flex flex-wrap gap-2 text-xs text-gray-400 mb-2">
                   <span>{r.customers?.company_name}</span>
                   {r.location && <span>· {r.location}</span>}
-                  <span>· {format(new Date(r.created_at), 'dd MMM yyyy')}</span>
+                  <span>· {format(new Date(r.created_at), 'dd MMM yyyy, HH:mm')}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs text-gray-300">{r.requirement_id}</span>

@@ -9,8 +9,6 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useDraft } from "../../hooks/useDraft";
 
-const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
-
 export default function RequirementForm({ existing, onSuccess, onCancel }) {
   const { profile } = useAuth();
   const isEdit = !!existing;
@@ -24,7 +22,6 @@ export default function RequirementForm({ existing, onSuccess, onCancel }) {
     location: existing?.location ?? "",
     start_date: existing?.start_date ?? "",
     end_date: existing?.end_date ?? "",
-    priority: existing?.priority ?? "Normal",
     notes: existing?.notes ?? "",
   };
 
@@ -135,34 +132,26 @@ export default function RequirementForm({ existing, onSuccess, onCancel }) {
           />
         </div>
 
-        {/* Location + Priority */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Location
-            </label>
-            <input
-              className="input"
-              placeholder="e.g. Ahmadi, Shuwaikh"
-              value={form.location}
-              onChange={(e) => set("location", e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Priority
-            </label>
-            <select
-              className="input"
-              value={form.priority}
-              onChange={(e) => set("priority", e.target.value)}
-            >
-              {PRIORITIES.map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-            </select>
-          </div>
+        {/* Location */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Location
+          </label>
+          <input
+            className="input"
+            placeholder="e.g. Ahmadi, Shuwaikh"
+            value={form.location}
+            onChange={(e) => set("location", e.target.value)}
+          />
         </div>
+
+        {/* Status info note */}
+        {!isEdit && (
+          <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 rounded-xl border border-blue-100">
+            <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0"/>
+            <p className="text-xs text-blue-700">New requirements start with <span className="font-semibold">Pending Review</span> status and progress automatically</p>
+          </div>
+        )}
 
         {/* Dates */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

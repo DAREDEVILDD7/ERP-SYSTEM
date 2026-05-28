@@ -87,11 +87,11 @@ export async function getQuotation(id) {
 }
 
 export async function createQuotation(payload, items) {
-  if (_creating) throw new Error("Please wait, already saving a quotation.");
+  if (_creating) throw new Error('Please wait, already saving a quotation.');
   _creating = true;
   try {
     const { data: quotation, error } = await supabase
-      .from("quotations")
+      .from('quotations')
       .insert(payload)
       .select()
       .single();
@@ -99,15 +99,21 @@ export async function createQuotation(payload, items) {
 
     if (items?.length > 0) {
       const { error: itemsError } = await supabase
-        .from("quotation_items")
-        .insert(
-          items.map((item) => ({
-            ...item,
-            quotation_id: quotation.quotation_id,
-          })),
-        );
+        .from('quotation_items')
+        .insert(items.map(item => ({ ...item, quotation_id: quotation.quotation_id })));
       if (itemsError) throw itemsError;
     }
+
+    // Post system message to requirement chat thread
+    if (payload.requirement_id && payload.prepared_by) {
+      await postQuoteCreatedChatMessage(
+        quotation.quotation_id,
+        payload.requirement_id,
+        payload.prepared_by,
+        'Sales'
+      );
+    }
+
     return quotation;
   } finally {
     _creating = false;
@@ -189,4 +195,18 @@ export async function getEquipmentStockByType() {
     if (u.status === "Reserved") map[key].reserved++;
   });
   return map;
+}
+
+export async function postQuoteCreatedChatMessage(quotationId, requirementId, userId, department) {
+  if (!requirementId) return;
+  const { error } = await supabase.from('chat_messages').insert({
+    related_requirement: requirementId,
+    sender_id:    userId,
+    department:   department,
+    message:      `Quote Created — ${quotationId}`,
+    message_type: 'quote_ref',
+    ref_id:       quotationId,
+    ref_type:     'quotation',
+  });
+  if (error) console.error('Failed to post quote chat message:', error);
 }

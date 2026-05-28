@@ -17,7 +17,7 @@ export async function getRequirements(filters = {}) {
 
   const { data, error } = await query;
   if (error) throw error;
-  return data;
+  return data ?? [];
 }
 
 export async function getRequirement(id) {
@@ -27,8 +27,14 @@ export async function getRequirement(id) {
       *,
       customers ( * ),
       users!requirements_created_by_fkey ( name, role, department ),
-      quotations ( quotation_id, status, total_amount_kwd, quotation_date ),
-      chat_messages ( *, users!chat_messages_sender_id_fkey ( name, role ) )
+      quotations (
+        quotation_id, status, total_amount_kwd, quotation_date,
+        users!quotations_prepared_by_fkey ( name )
+      ),
+      chat_messages (
+        *,
+        users!chat_messages_sender_id_fkey ( name, role, department )
+      )
     `)
     .eq('requirement_id', id)
     .single();
@@ -39,7 +45,7 @@ export async function getRequirement(id) {
 export async function createRequirement(payload) {
   const { data, error } = await supabase
     .from('requirements')
-    .insert(payload)
+    .insert({ ...payload, status: 'Pending Review' })
     .select()
     .single();
   if (error) throw error;
@@ -64,5 +70,5 @@ export async function getCustomers() {
     .eq('is_active', true)
     .order('company_name');
   if (error) throw error;
-  return data;
+  return data ?? [];
 }

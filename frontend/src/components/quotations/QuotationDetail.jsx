@@ -33,6 +33,7 @@ export default function QuotationDetail({
   const [acting, setActing] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
   const [showReject, setShowReject] = useState(false);
+  const [showApproveConfirm, setShowApproveConfirm] = useState(false);
   const navigate = useNavigate();
 
   const load = async () => {
@@ -146,7 +147,7 @@ export default function QuotationDetail({
           {canApprove && q.status === "Sent" && (
             <>
               <button
-                onClick={() => handleAction("Approved")}
+                onClick={() => setShowApproveConfirm(true)}
                 disabled={acting}
                 className="btn-primary flex items-center gap-2 bg-green-500 hover:bg-green-600"
               >
@@ -163,6 +164,42 @@ export default function QuotationDetail({
           )}
         </div>
       </div>
+
+      {/* Approve confirmation modal */}
+      {showApproveConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <CheckCircle size={18} className="text-green-500"/> Confirm Quotation Approval
+            </h3>
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Quotation</span><span className="font-mono font-medium">{q.quotation_id}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Customer</span><span className="font-medium">{q.customers?.company_name}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="font-bold text-gray-900">KWD {Number(q.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Items</span><span className="font-medium">{q.quotation_items?.length ?? 0} line items</span></div>
+              {q.requirement_id && <div className="flex justify-between"><span className="text-gray-500">Requirement</span><span className="font-mono text-xs">{q.requirement_id}</span></div>}
+            </div>
+            <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-sm text-green-700">
+              <p className="font-medium mb-1">Approving will:</p>
+              <ul className="text-xs space-y-0.5 list-disc list-inside text-green-600">
+                <li>Mark this quotation as Approved</li>
+                <li>Reserve the specified equipment</li>
+                <li>Create pending dispatch entries</li>
+                <li>Update the linked requirement status to Approved</li>
+              </ul>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowApproveConfirm(false)} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setShowApproveConfirm(false); handleAction('Approved'); }}
+                disabled={acting}
+                className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                {acting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>}
+                Confirm Approval
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reject note modal */}
       {showReject && (
@@ -251,9 +288,15 @@ export default function QuotationDetail({
                 )}
               </div>
               <div>
-                <p className="text-xs text-gray-400 mb-1">Date</p>
+                <p className="text-xs text-gray-400 mb-1">Created</p>
                 <p className="font-medium text-gray-800">
                   {format(new Date(q.quotation_date), "dd MMM yyyy")}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400 mb-1">Created At</p>
+                <p className="font-medium text-gray-800">
+                  {format(new Date(q.created_at), "dd MMM yyyy, HH:mm")}
                 </p>
               </div>
               <div>
