@@ -23,7 +23,8 @@ import { supabase } from "../../lib/supabaseClient";
 import toast from "react-hot-toast";
 import clsx from "clsx";
 import { useNavigate } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, ClipboardList } from "lucide-react";
+import { getRequirement } from "../../api/requirements";
 
 const STATUSES = [
   "All",
@@ -56,6 +57,19 @@ export default function QuotationsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const navigate = useNavigate();
+
+  const [previewReqId, setPreviewReqId] = useState(null);
+  const [previewReq,   setPreviewReq]   = useState(null);
+  const [reqLoading,   setReqLoading]   = useState(false);
+
+  useEffect(() => {
+    if (!previewReqId) { setPreviewReq(null); return; }
+    setReqLoading(true);
+    getRequirement(previewReqId)
+      .then(setPreviewReq)
+      .catch(() => toast.error('Failed to load requirement'))
+      .finally(() => setReqLoading(false));
+  }, [previewReqId]);
 
   const { search, status, preparedBy, dateFrom, dateTo } = quotationsFilters;
 
@@ -459,22 +473,15 @@ export default function QuotationsPage() {
                       <td className="px-5 py-3">
                         <StatusBadge status={q.status} />
                       </td>
-                      <td className="px-5 py-3 text-xs">
+                      <td className="px-5 py-3 text-xs" onClick={e => e.stopPropagation()}>
                         {q.requirement_id ? (
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate("/requirements", {
-                                state: { highlightId: q.requirement_id },
-                              });
-                            }}
-                            className="font-mono text-primary-600 hover:underline flex items-center gap-1"
+                            onClick={() => setPreviewReqId(q.requirement_id)}
+                            className="font-mono text-primary-600 hover:underline flex items-center gap-1 text-xs"
                           >
-                            <ExternalLink size={11} /> {q.requirement_id}
+                            <ExternalLink size={11}/> {q.requirement_id}
                           </button>
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
+                        ) : <span className="text-gray-300">—</span>}
                       </td>
                       <td
                         className="px-5 py-3"
@@ -540,6 +547,52 @@ export default function QuotationsPage() {
             ))}
           </div>
         </>
+      )}
+      {/* Requirement preview popup */}
+      {previewReqId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
+              <div className="flex items-center gap-2">
+                <ClipboardList size={16} className="text-primary-500"/>
+                <div>
+                  <h3 className="font-semibold text-gray-900">{previewReqId}</h3>
+                  <p className="text-xs text-gray-400">Requirement Details</p>
+                </div>
+              </div>
+              <button onClick={() => { setPreviewReqId(null); setPreviewReq(null); }}
+                className="text-gray-400 hover:text-gray-600 p-1"><X size={20}/></button>
+            </div>
+            {reqLoading ? (
+              <div className="p-8 flex justify-center"><LoadingSpinner fullscreen={false}/></div>
+            ) : !previewReq ? (
+              <p className="text-gray-400 text-sm text-center p-8">Loading…</p>
+            ) : (
+              <div className="p-5 space-y-4">
+                <div className="flex gap-2 flex-wrap">
+                  <StatusBadge status={previewReq.status}/>
+                  <StatusBadge status={previewReq.priority ?? 'Normal'}/>
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div><p className="text-xs text-gray-400">Customer</p><p className="font-medium">{previewReq.customers?.company_name ?? '—'}</p></div>
+                  <div><p className="text-xs text-gray-400">Contact</p><p className="font-medium">{previewReq.requested_by}</p></div>
+                  <div><p className="text-xs text-gray-400">Location</p><p className="font-medium">{previewReq.location ?? '—'}</p></div>
+                  <div><p className="text-xs text-gray-400">Created By</p><p className="font-medium">{previewReq.users?.name ?? '—'}</p></div>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-3">
+                  <p className="text-xs text-gray-400 mb-1">Summary</p>
+                  <p className="text-sm text-gray-800 leading-relaxed">{previewReq.requirement_summary}</p>
+                </div>
+                {previewReq.notes && (
+                  <div className="bg-yellow-50 rounded-xl p-3">
+                    <p className="text-xs text-gray-400 mb-1">Notes</p>
+                    <p className="text-sm text-gray-600">{previewReq.notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

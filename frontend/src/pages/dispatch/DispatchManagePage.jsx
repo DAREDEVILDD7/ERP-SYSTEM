@@ -20,6 +20,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Filter,
   ChevronDown,
   ChevronUp,
   Package,
@@ -96,6 +97,19 @@ export default function DispatchManagePage() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+
+  // Search & filter state
+  const [search,       setSearch]       = useState('');
+  const [showFilters,  setShowFilters]  = useState(false);
+  const [dateFrom,     setDateFrom]     = useState('');
+  const [dateTo,       setDateTo]       = useState('');
+  const [driverSearch, setDriverSearch] = useState('');
+  const [destSearch,   setDestSearch]   = useState('');
+
+  // Assign modal state
+  const [assignTarget, setAssignTarget] = useState(null);
+  const [assignForm,   setAssignForm]   = useState({ driver_name: '', vehicle_type: '', vehicle_plate: '', notes: '' });
+  const [assigning,    setAssigning]    = useState(false);
 
   // // Maintenance issue modal (when setting status to Maintenance from dispatch)
   // const [maintenanceModal, setMaintenanceModal] = useState(null);
@@ -276,6 +290,25 @@ export default function DispatchManagePage() {
 
   const quoteEquipment =
     selectedQuote?.quotation_items?.filter((i) => i.equipment_id) ?? [];
+
+  // Client-side filtering of dispatches
+  const filteredDispatches = dispatches.filter(d => {
+    const q = search.toLowerCase();
+    const matchSearch = !q ||
+      d.dispatch_id?.toLowerCase().includes(q) ||
+      d.quotation_id?.toLowerCase().includes(q) ||
+      d.quotations?.customers?.company_name?.toLowerCase().includes(q) ||
+      d.driver_name?.toLowerCase().includes(q) ||
+      d.destination?.toLowerCase().includes(q);
+    const matchDriver = !driverSearch ||
+      d.driver_name?.toLowerCase().includes(driverSearch.toLowerCase());
+    const matchDest = !destSearch ||
+      d.destination?.toLowerCase().includes(destSearch.toLowerCase());
+    const matchStatus = statusFilter === 'All' || d.status === statusFilter;
+    const matchDateFrom = !dateFrom || d.dispatch_date >= dateFrom;
+    const matchDateTo   = !dateTo   || d.dispatch_date <= dateTo;
+    return matchSearch && matchDriver && matchDest && matchStatus && matchDateFrom && matchDateTo;
+  });
 
   // ── New dispatch form ──────────────────────────────────────────────────────
   if (showForm) {
@@ -750,7 +783,9 @@ export default function DispatchManagePage() {
             Dispatch Management
           </h2>
           <p className="text-sm text-gray-400">
-            {dispatches.length} dispatches
+            {filteredDispatches.length !== dispatches.length
+              ? `${filteredDispatches.length} of ${dispatches.length} dispatches`
+              : `${dispatches.length} dispatches`}
           </p>
         </div>
         <div className="flex gap-2">
@@ -788,10 +823,95 @@ export default function DispatchManagePage() {
         </div>
       </div>
 
+      {/* Search + Filter bar */}
+      <div className="card p-4 space-y-3">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+            <input
+              className="input pl-9"
+              placeholder="Search by dispatch ID, quote ID, customer, driver, destination…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X size={14}/>
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={clsx(
+              'btn-secondary flex items-center gap-2',
+              (dateFrom || dateTo || driverSearch || destSearch) && 'ring-2 ring-primary-300'
+            )}
+          >
+            <Filter size={15}/> Filters
+          </button>
+        </div>
+        {showFilters && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Driver</label>
+              <input
+                className="input text-sm"
+                placeholder="Filter by driver…"
+                value={driverSearch}
+                onChange={e => setDriverSearch(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Destination</label>
+              <input
+                className="input text-sm"
+                placeholder="Filter by destination…"
+                value={destSearch}
+                onChange={e => setDestSearch(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">From Date</label>
+              <input
+                type="date"
+                className="input text-sm"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">To Date</label>
+              <input
+                type="date"
+                className="input text-sm"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+              />
+            </div>
+            {(dateFrom || dateTo || driverSearch || destSearch) && (
+              <div className="col-span-2 sm:col-span-4 flex justify-end">
+                <button
+                  onClick={() => { setDateFrom(''); setDateTo(''); setDriverSearch(''); setDestSearch(''); }}
+                  className="text-xs text-red-400 hover:underline"
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {loading ? (
         <LoadingSpinner fullscreen={false} />
-      ) : dispatches.length === 0 ? (
-        <EmptyState message="No dispatches found" icon={Truck} />
+      ) : filteredDispatches.length === 0 ? (
+        <EmptyState
+          message={dispatches.length === 0 ? "No dispatches found" : "No dispatches match your filters"}
+          icon={Truck}
+        />
       ) : (
         <>
           {/* Desktop table */}
@@ -813,7 +933,7 @@ export default function DispatchManagePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {dispatches.map((d) => (
+                {filteredDispatches.map((d) => (
                   <>
                     <tr
                       key={d.dispatch_id}
@@ -880,8 +1000,13 @@ export default function DispatchManagePage() {
                         <div className="flex items-center gap-1">
                           <Package size={13} className="text-gray-400" />
                           <span className="text-sm text-gray-700 font-medium">
-                            {d.dispatch_items?.length ?? 0} item
-                            {(d.dispatch_items?.length ?? 0) !== 1 ? "s" : ""}
+                            {(() => {
+                              const itemCount = d.dispatch_items?.length ?? 0;
+                              if (itemCount > 0) return `${itemCount} item${itemCount !== 1 ? 's' : ''}`;
+                              const qItemCount = d.quotations?.quotation_items?.filter(i => i.equipment_id)?.length ?? 0;
+                              if (qItemCount > 0) return `${qItemCount} item${qItemCount !== 1 ? 's' : ''} (from quote)`;
+                              return '—';
+                            })()}
                           </span>
                         </div>
                       </td>
@@ -910,26 +1035,56 @@ export default function DispatchManagePage() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {STATUS_NEXT[d.status] && (
+                            {/* Pending → show Assign button that opens modal */}
+                            {d.status === 'Pending' && (
                               <button
-                                onClick={() =>
-                                  quickStatus(
-                                    d.dispatch_id,
-                                    STATUS_NEXT[d.status],
-                                  )
-                                }
+                                onClick={() => {
+                                  setAssignTarget(d);
+                                  setAssignForm({
+                                    driver_name:   d.driver_name   ?? '',
+                                    vehicle_type:  d.vehicle_type  ?? '',
+                                    vehicle_plate: d.vehicle_plate ?? '',
+                                    notes:         d.notes         ?? '',
+                                  });
+                                }}
                                 className="text-xs bg-primary-500 text-white px-2 py-1 rounded-lg"
                               >
-                                → {STATUS_NEXT[d.status]}
+                                Assign Driver
                               </button>
                             )}
-                            {!["Cancelled", "Completed", "Returned"].includes(
-                              d.status,
-                            ) && (
+                            {/* Assigned → In Transit */}
+                            {d.status === 'Assigned' && (
+                              <button
+                                onClick={() => quickStatus(d.dispatch_id, 'In Transit')}
+                                className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg"
+                              >
+                                → In Transit
+                              </button>
+                            )}
+                            {/* In Transit → Completed */}
+                            {d.status === 'In Transit' && (
+                              <button
+                                onClick={() => quickStatus(d.dispatch_id, 'Completed')}
+                                className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg"
+                              >
+                                ✓ Completed
+                              </button>
+                            )}
+                            {/* Completed → Returned */}
+                            {d.status === 'Completed' && (
+                              <button
+                                onClick={() => quickStatus(d.dispatch_id, 'Returned')}
+                                className="text-xs bg-gray-500 text-white px-2 py-1 rounded-lg"
+                              >
+                                ↩ Returned
+                              </button>
+                            )}
+                            {/* Cancel button */}
+                            {!['Cancelled', 'Completed', 'Returned'].includes(d.status) && (
                               <button
                                 onClick={() => {
                                   setCancelTarget(d);
-                                  setCancelReason("");
+                                  setCancelReason('');
                                 }}
                                 className="text-xs bg-red-50 text-red-500 px-2 py-1 rounded-lg hover:bg-red-100"
                               >
@@ -1042,7 +1197,7 @@ export default function DispatchManagePage() {
 
           {/* Mobile */}
           <div className="md:hidden space-y-3">
-            {dispatches.map((d) => (
+            {filteredDispatches.map((d) => (
               <div key={d.dispatch_id} className="card p-4">
                 <div className="flex justify-between items-start mb-2">
                   <div>
@@ -1072,7 +1227,13 @@ export default function DispatchManagePage() {
                 )}
                 <p className="text-sm text-gray-600 mt-1">→ {d.destination}</p>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {d.dispatch_items?.length ?? 0} equipment ·{" "}
+                  {(() => {
+                    const itemCount = d.dispatch_items?.length ?? 0;
+                    if (itemCount > 0) return `${itemCount} equipment`;
+                    const qItemCount = d.quotations?.quotation_items?.filter(i => i.equipment_id)?.length ?? 0;
+                    if (qItemCount > 0) return `${qItemCount} equipment (from quote)`;
+                    return '0 equipment';
+                  })()} ·{" "}
                   {d.driver_name || "No driver"}
                 </p>
                 {d.dispatch_date && (
@@ -1088,14 +1249,44 @@ export default function DispatchManagePage() {
                   </p>
                 )}
                 <div className="flex gap-2 mt-2 flex-wrap">
-                  {canWrite && STATUS_NEXT[d.status] && (
+                  {canWrite && d.status === 'Pending' && (
                     <button
-                      onClick={() =>
-                        quickStatus(d.dispatch_id, STATUS_NEXT[d.status])
-                      }
+                      onClick={() => {
+                        setAssignTarget(d);
+                        setAssignForm({
+                          driver_name:   d.driver_name   ?? '',
+                          vehicle_type:  d.vehicle_type  ?? '',
+                          vehicle_plate: d.vehicle_plate ?? '',
+                          notes:         d.notes         ?? '',
+                        });
+                      }}
                       className="text-xs bg-primary-500 text-white px-3 py-1.5 rounded-lg"
                     >
-                      → {STATUS_NEXT[d.status]}
+                      Assign Driver
+                    </button>
+                  )}
+                  {canWrite && d.status === 'Assigned' && (
+                    <button
+                      onClick={() => quickStatus(d.dispatch_id, 'In Transit')}
+                      className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg"
+                    >
+                      → In Transit
+                    </button>
+                  )}
+                  {canWrite && d.status === 'In Transit' && (
+                    <button
+                      onClick={() => quickStatus(d.dispatch_id, 'Completed')}
+                      className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg"
+                    >
+                      ✓ Completed
+                    </button>
+                  )}
+                  {canWrite && d.status === 'Completed' && (
+                    <button
+                      onClick={() => quickStatus(d.dispatch_id, 'Returned')}
+                      className="text-xs bg-gray-500 text-white px-3 py-1.5 rounded-lg"
+                    >
+                      ↩ Returned
                     </button>
                   )}
                   {canWrite &&
@@ -1117,6 +1308,99 @@ export default function DispatchManagePage() {
             ))}
           </div>
         </>
+      )}
+
+      {/* ── Assign Details Modal ── */}
+      {assignTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+              <Truck size={18} className="text-primary-500"/> Assign Dispatch
+            </h3>
+            <p className="text-sm text-gray-500">
+              <span className="font-medium text-gray-700">{assignTarget.dispatch_id}</span>
+              {assignTarget.quotations?.customers?.company_name && ` — ${assignTarget.quotations.customers.company_name}`}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Driver Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className="input"
+                  value={assignForm.driver_name}
+                  onChange={e => setAssignForm(f => ({...f, driver_name: e.target.value}))}
+                  placeholder="Full name of driver"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Type</label>
+                <input
+                  className="input"
+                  value={assignForm.vehicle_type}
+                  onChange={e => setAssignForm(f => ({...f, vehicle_type: e.target.value}))}
+                  placeholder="e.g. Flatbed Trailer, Cargo Truck"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Plate</label>
+                <input
+                  className="input"
+                  value={assignForm.vehicle_plate}
+                  onChange={e => setAssignForm(f => ({...f, vehicle_plate: e.target.value}))}
+                  placeholder="e.g. KWI 12345"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  className="input resize-y"
+                  rows={2}
+                  value={assignForm.notes}
+                  onChange={e => setAssignForm(f => ({...f, notes: e.target.value}))}
+                  placeholder="Any special instructions…"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setAssignTarget(null)}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={assigning || !assignForm.driver_name.trim()}
+                onClick={async () => {
+                  if (!assignForm.driver_name.trim()) return toast.error('Enter driver name');
+                  setAssigning(true);
+                  try {
+                    await updateDispatch(assignTarget.dispatch_id, {
+                      status:        'Assigned',
+                      driver_name:   assignForm.driver_name,
+                      vehicle_type:  assignForm.vehicle_type,
+                      vehicle_plate: assignForm.vehicle_plate,
+                      notes:         assignForm.notes,
+                    });
+                    toast.success('Dispatch assigned with driver details');
+                    setAssignTarget(null);
+                    setAssignForm({ driver_name: '', vehicle_type: '', vehicle_plate: '', notes: '' });
+                    load();
+                  } catch {
+                    toast.error('Failed to assign');
+                  } finally {
+                    setAssigning(false);
+                  }
+                }}
+                className="btn-primary flex items-center gap-2 disabled:opacity-50"
+              >
+                {assigning && <Loader2 size={14} className="animate-spin"/>}
+                {assigning ? 'Assigning…' : 'Confirm Assignment'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Cancel modal ── */}
