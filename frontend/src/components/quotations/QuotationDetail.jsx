@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getQuotation, updateQuotation } from "../../api/quotations";
+import { getRequirement } from "../../api/requirements";
 import StatusBadge from "../common/StatusBadge";
 import LoadingSpinner from "../common/LoadingSpinner";
 import {
@@ -10,14 +11,16 @@ import {
   XCircle,
   Send,
   User,
+  ClipboardList,
+  Package,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { downloadQuotationPDF } from "../../lib/pdfGenerator";
 import toast from "react-hot-toast";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
-import { useNavigate } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
+// import { ExternalLink } from "lucide-react";
 
 export default function QuotationDetail({
   quotationId,
@@ -34,7 +37,7 @@ export default function QuotationDetail({
   const [rejectNote, setRejectNote] = useState("");
   const [showReject, setShowReject] = useState(false);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
-  const navigate = useNavigate();
+  const [showReqPreview, setShowReqPreview] = useState(false);
 
   const load = async () => {
     try {
@@ -441,31 +444,126 @@ export default function QuotationDetail({
             </div>
           )}
           {q.requirement_id && (
-            <div className="card p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">
-                Linked Requirement
-              </h3>
-              <p className="text-xs text-gray-400 font-mono mb-2">
-                {q.requirement_id}
-              </p>
+            <div className="card p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-gray-700">Linked Requirement</h3>
+              <p className="text-xs font-mono text-gray-400">{q.requirement_id}</p>
               {q.requirements?.requirement_summary && (
-                <p className="text-sm text-gray-600 mb-3">
-                  {q.requirements.requirement_summary}
-                </p>
+                <p className="text-xs text-gray-600 leading-relaxed">{q.requirements.requirement_summary}</p>
               )}
+              {q.requirements?.status && <StatusBadge status={q.requirements.status}/>}
               <button
-                onClick={() =>
-                  navigate("/requirements", {
-                    state: { highlightId: q.requirement_id },
-                  })
-                }
-                className="btn-secondary text-xs flex items-center gap-1 w-full justify-center"
+                onClick={() => setShowReqPreview(true)}
+                className="btn-secondary text-xs flex items-center gap-1.5 w-full justify-center"
               >
-                <ExternalLink size={12} /> View Requirement
+                <ClipboardList size={13}/> View Requirement Details
               </button>
             </div>
           )}
         </div>
+      </div>
+      {/* Requirement preview popup */}
+      {showReqPreview && q.requirement_id && (
+        <RequirementPreview
+          requirementId={q.requirement_id}
+          onClose={() => setShowReqPreview(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── RequirementPreview ───────────────────────────────────────────────────────
+function RequirementPreview({ requirementId, onClose }) {
+  const [req, setReq] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getRequirement(requirementId)
+      .then(setReq)
+      .catch(() => toast.error('Failed to load requirement'))
+      .finally(() => setLoading(false));
+  }, [requirementId]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
+          <div className="flex items-center gap-2">
+            <ClipboardList size={16} className="text-primary-500"/>
+            <div>
+              <h3 className="font-semibold text-gray-900">{requirementId}</h3>
+              <p className="text-xs text-gray-400">Requirement Details</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+            <X size={20}/>
+          </button>
+        </div>
+
+        {/* Body */}
+        {loading ? (
+          <div className="p-8 flex justify-center"><LoadingSpinner fullscreen={false}/></div>
+        ) : !req ? (
+          <p className="text-gray-400 text-sm text-center p-8">Not found</p>
+        ) : (
+          <div className="p-5 space-y-4">
+            {/* Status + Priority */}
+            <div className="flex gap-2 flex-wrap">
+              <StatusBadge status={req.status}/>
+              <StatusBadge status={req.priority ?? 'Normal'}/>
+            </div>
+
+            {/* Key info grid */}
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><p className="text-xs text-gray-400">Customer</p><p className="font-medium">{req.customers?.company_name ?? '—'}</p></div>
+              <div><p className="text-xs text-gray-400">Contact</p><p className="font-medium">{req.requested_by ?? '—'}</p></div>
+              <div><p className="text-xs text-gray-400">Location</p><p className="font-medium">{req.location ?? '—'}</p></div>
+              <div><p className="text-xs text-gray-400">Created By</p><p className="font-medium">{req.users?.name ?? '—'}</p></div>
+              {req.start_date && (
+                <div><p className="text-xs text-gray-400">Start Date</p><p className="font-medium">{format(new Date(req.start_date), 'dd MMM yyyy')}</p></div>
+              )}
+              {req.end_date && (
+                <div><p className="text-xs text-gray-400">End Date</p><p className="font-medium">{format(new Date(req.end_date), 'dd MMM yyyy')}</p></div>
+              )}
+            </div>
+
+            {/* Summary */}
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 mb-1">Summary</p>
+              <p className="text-sm text-gray-800 leading-relaxed">{req.requirement_summary}</p>
+            </div>
+
+            {/* Equipment items */}
+            {req.requirement_items?.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-gray-500 uppercase mb-2 flex items-center gap-1.5">
+                  <Package size={11}/> Requested Equipment
+                </p>
+                <div className="space-y-1.5">
+                  {req.requirement_items.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg text-xs">
+                      <div>
+                        <p className="font-medium text-gray-700">{item.description}</p>
+                        {item.capacity && <p className="text-gray-400">{item.capacity}</p>}
+                        {item.equipment_types?.name && <p className="text-gray-400">{item.equipment_types.name}</p>}
+                      </div>
+                      <span className="font-semibold text-primary-600 bg-primary-50 px-2 py-0.5 rounded">× {item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {req.notes && (
+              <div className="bg-yellow-50 rounded-xl p-3">
+                <p className="text-xs text-gray-400 mb-1">Notes</p>
+                <p className="text-sm text-gray-600">{req.notes}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

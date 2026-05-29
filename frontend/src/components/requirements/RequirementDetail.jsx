@@ -6,7 +6,7 @@ import StatusBadge from '../common/StatusBadge';
 import LoadingSpinner from '../common/LoadingSpinner';
 import {
   ArrowLeft, Edit2, FileText, Send, X,
-  CheckCircle, AtSign
+  CheckCircle, AtSign, Package
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabaseClient';
@@ -406,6 +406,34 @@ export default function RequirementDetail({ requirementId, onBack, onEdit, canRe
               </div>
             )}
           </div>
+
+          {/* Equipment items requested */}
+          {req.requirement_items?.length > 0 && (
+            <div className="card p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <Package size={15} className="text-primary-500"/> Equipment Requested ({req.requirement_items.length} items)
+              </h3>
+              <div className="space-y-2">
+                {req.requirement_items.map((item, i) => (
+                  <div key={i} className="flex items-start justify-between p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-800">{item.description}</p>
+                      {item.equipment_types?.name && (
+                        <p className="text-xs text-gray-400 mt-0.5">{item.equipment_types.name}</p>
+                      )}
+                      {item.capacity && <p className="text-xs text-gray-400">{item.capacity}</p>}
+                      {item.notes && <p className="text-xs text-gray-400 italic mt-0.5">{item.notes}</p>}
+                    </div>
+                    <div className="shrink-0 ml-3">
+                      <span className="text-sm font-bold text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
+                        × {item.quantity}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Linked quotations */}
           {req.quotations?.length > 0 && (
