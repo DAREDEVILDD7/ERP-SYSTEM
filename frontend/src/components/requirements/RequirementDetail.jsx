@@ -6,7 +6,7 @@ import StatusBadge from '../common/StatusBadge';
 import LoadingSpinner from '../common/LoadingSpinner';
 import {
   ArrowLeft, Edit2, FileText, Send, X,
-  CheckCircle, User, AtSign, Search,
+  CheckCircle, AtSign
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabaseClient';
@@ -261,7 +261,7 @@ export default function RequirementDetail({ requirementId, onBack, onEdit, canRe
   const [previewReqId,   setPreviewReqId]   = useState(null);
 
   // Approve confirmation
-  const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+  // const [showApproveConfirm, setShowApproveConfirm] = useState(false);
 
   const messagesEndRef = useRef(null);
 

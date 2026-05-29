@@ -54,12 +54,12 @@ const DSP_STATUSES = [
   "Cancelled",
 ];
 
-const STATUS_NEXT = {
-  Pending: "Assigned",
-  Assigned: "In Transit",
-  "In Transit": "Completed",
-  Completed: "Returned",
-};
+// const STATUS_NEXT = {
+//   Pending: "Assigned",
+//   Assigned: "In Transit",
+//   "In Transit": "Completed",
+//   Completed: "Returned",
+// };
 
 const EMPTY_FORM = {
   quotation_id: "",

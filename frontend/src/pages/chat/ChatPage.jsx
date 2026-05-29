@@ -331,7 +331,7 @@ function ChatMessageContent({ text, isMe, onQuoteClick, onReqClick }) {
       parts.push({ type: 'mention', value: raw });
     } else {
       // Classify KW-* IDs
-      const upper = raw.toUpperCase();
+      // const upper = raw.toUpperCase();
       let kind = 'generic';
       if (/^KW-Q/i.test(raw))   kind = 'quotation';
       if (/^KW-R/i.test(raw))   kind = 'requirement';

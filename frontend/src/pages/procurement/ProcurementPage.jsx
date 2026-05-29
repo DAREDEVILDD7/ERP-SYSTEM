@@ -23,7 +23,7 @@ import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const TABS          = ['Requests','Purchase Orders','Vendors'];
-const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
+// const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
 const EMPTY_ITEM    = { description:'', quantity:1, unit:'Unit', unit_price_kwd:'', equipment_type_id:'' };
 
 // ── Vendor Modal — defined OUTSIDE parent to prevent remount on state change ──
