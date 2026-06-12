@@ -58,7 +58,10 @@ export async function createProcurement(payload, items) {
     const { error: ie } = await supabase
       .from("procurement_items")
       .insert(
-        items.map((i) => ({ ...i, procurement_id: data.procurement_id })),
+        items.map(({ description, unit_price_kwd, equipment_type_id }) => ({
+          description, unit_price_kwd, equipment_type_id,
+          procurement_id: data.procurement_id,
+        })),
       );
     if (ie) throw ie;
   }
@@ -169,36 +172,63 @@ export async function receiveProcurement(procurementId, items, userId) {
     await supabase
       .from("procurement_items")
       .update({
-        received_qty: item.received_qty,
-        received_date: item.received_date,
-        fleet_location: item.fleet_location,
-        lease_start: item.lease_start || null,
-        lease_end: item.lease_end || null,
+        received_qty:     item.received_qty,
+        received_date:    item.received_date,
+        fleet_location:   item.fleet_location,
+        lease_start:      item.lease_start || null,
+        lease_end:        item.lease_end   || null,
         procurement_type: item.procurement_type || "Purchase",
-        added_to_fleet: true,
-        fleet_added_at: new Date().toISOString(),
+        added_to_fleet:   true,
+        fleet_added_at:   new Date().toISOString(),
       })
       .eq("item_id", item.item_id);
 
     // Add to equipment fleet if equipment_type_id specified
     if (item.equipment_type_id && item.received_qty > 0) {
+      const capacityPart = item.description?.includes(' — ')
+        ? item.description.split(' — ').slice(1).join(' — ').trim()
+        : null;
+
+      // Validate daily rate
+      const dailyRate = Number(item.daily_rate_kwd);
+      if (!dailyRate || dailyRate <= 0) {
+        throw new Error(`Daily rate is required for: ${item.description}`);
+      }
+
       const units = [];
       for (let i = 0; i < item.received_qty; i++) {
+        const serial = item.serial_numbers?.[i]?.trim() || null;
+        // Serial is required — enforced in UI but double-check here
+        if (!serial) {
+          throw new Error(`Serial number missing for unit ${i + 1} of: ${item.description}`);
+        }
         units.push({
-          type_id: item.equipment_type_id,
-          status: "Available",
-          location: item.fleet_location || "Yard",
-          daily_rate_kwd: 0,
-          procurement_id: procurementId,
-          procurement_type: item.procurement_type || "Purchase",
+          type_id:          item.equipment_type_id,
+          status:           'Available',
+          location:         item.fleet_location || 'Yard',
+          // daily_rate_kwd — stored per unit, entered during receive
+          daily_rate_kwd:   dailyRate,
+          procurement_id:   procurementId,
+          procurement_type: item.procurement_type || 'Purchase',
           lease_start_date: item.lease_start || null,
-          lease_end_date: item.lease_end || null,
-          notes: `Received from procurement ${procurementId}`,
+          lease_end_date:   item.lease_end   || null,
+          notes:            `Received from procurement ${procurementId}`,
+          // serial_number — stored in equipment_units.serial_number (unique constraint)
+          serial_number:    serial,
+          capacity:         capacityPart,
         });
       }
       if (units.length > 0) {
-        const { error } = await supabase.from("equipment_units").insert(units);
-        if (error) throw error;
+        const { error } = await supabase.from('equipment_units').insert(units);
+        if (error) {
+          // Provide a clear message for duplicate serial number constraint violation
+          if (error.code === '23505' && error.message?.includes('serial_number')) {
+            const match = error.message.match(/Key \(serial_number\)=\(([^)]+)\)/);
+            const dupSerial = match ? match[1] : 'unknown';
+            throw new Error(`Serial number "${dupSerial}" already exists in the fleet. Each unit must have a unique serial number.`);
+          }
+          throw error;
+        }
       }
     }
   }
@@ -217,7 +247,7 @@ export async function receiveProcurement(procurementId, items, userId) {
       actual_delivery: new Date().toISOString().split("T")[0],
     })
     .eq("procurement_id", procurementId)
-    .in("status", ["Submitted", "Acknowledged", "Partially Delivered"]);
+    .in("status", ["Submitted", "Acknowledged", "Partially Delivered", "Delivered"]);
 
   return true;
 }

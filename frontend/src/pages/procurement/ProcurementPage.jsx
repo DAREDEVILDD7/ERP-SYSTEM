@@ -24,7 +24,7 @@ import clsx from 'clsx';
 
 const TABS          = ['Requests','Purchase Orders','Vendors'];
 // const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
-const EMPTY_ITEM    = { description:'', quantity:1, unit:'Unit', unit_price_kwd:'', equipment_type_id:'' };
+const EMPTY_ITEM    = { description:'', capacity:'', unit_price_kwd:'', equipment_type_id:'' };
 
 // ── Vendor Modal — defined OUTSIDE parent to prevent remount on state change ──
 function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCreated, formLoading, setFormLoading }) {
@@ -128,7 +128,7 @@ function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCre
 // ── New Equipment Type Modal — also outside to prevent remount ──
 function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading }) {
   const [form, setForm] = useState({
-    name:'', category:'', description:'', default_capacity:'',
+    name:'', category:'',
     default_daily_rate_kwd:'', manufacturer:'', unit:'Unit',
   });
 
@@ -175,12 +175,6 @@ function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default Capacity</label>
-              <input className="input" value={form.default_capacity}
-                onChange={e => setForm(f => ({...f, default_capacity: e.target.value}))}
-                placeholder="e.g. 50 Ton" autoComplete="off"/>
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Default Daily Rate (KWD)</label>
               <input type="number" min="0" step="0.001" className="input" value={form.default_daily_rate_kwd}
                 onChange={e => setForm(f => ({...f, default_daily_rate_kwd: e.target.value}))}/>
@@ -191,12 +185,6 @@ function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading
                 onChange={e => setForm(f => ({...f, manufacturer: e.target.value}))}
                 placeholder="e.g. Liebherr" autoComplete="off"/>
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea className="input resize-y" rows={2} value={form.description}
-              onChange={e => setForm(f => ({...f, description: e.target.value}))}
-              placeholder="Brief description…"/>
           </div>
           <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
             <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
@@ -284,6 +272,135 @@ function EqTypeSelector({ value, eqTypes, onChange, onAddNew }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Capacity Selector ────────────────────────────────────────────────────────
+function CapacitySelector({ typeId, value, onChange, onAddNew }) {
+  const [options, setOptions]   = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [open,    setOpen]      = useState(false);
+  const ref                     = useRef(null);
+
+  useEffect(() => {
+    if (!typeId) { setOptions([]); return; }
+    setLoading(true);
+    supabase
+      .from('equipment_units')
+      .select('capacity')
+      .eq('type_id', typeId)
+      .then(({ data }) => {
+        const unique = [...new Set(
+          (data ?? []).map(u => u.capacity?.trim()).filter(Boolean)
+        )].sort();
+        setOptions(unique);
+        setLoading(false);
+      });
+  }, [typeId]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const display = value || 'Select capacity…';
+  const isPlaceholder = !value;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        disabled={!typeId}
+        onClick={() => { if (typeId) setOpen(v => !v); }}
+        className={clsx(
+          'input w-full text-left flex items-center justify-between text-sm',
+          !typeId && 'opacity-50 cursor-not-allowed'
+        )}
+      >
+        <span className={isPlaceholder ? 'text-gray-400' : 'text-gray-800'}>{display}</span>
+        <ChevronDown size={14} className="text-gray-400 shrink-0 ml-2"/>
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 right-0 z-50 bg-white border border-gray-200 rounded-xl shadow-xl mt-1 overflow-hidden">
+          <div className="max-h-44 overflow-y-auto">
+            {loading ? (
+              <p className="text-xs text-gray-400 text-center py-3">Loading…</p>
+            ) : (
+              <>
+                {/* N/A option always first */}
+                <button type="button"
+                  onClick={() => { onChange('N/A'); setOpen(false); }}
+                  className={clsx(
+                    'w-full text-left px-4 py-2.5 text-xs border-b border-gray-50 hover:bg-gray-50 transition-colors',
+                    value === 'N/A' && 'bg-primary-50'
+                  )}
+                >
+                  <span className="text-gray-500 italic">N/A — No capacity</span>
+                </button>
+                {options.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-2">No existing capacities</p>
+                )}
+                {options.map(cap => (
+                  <button key={cap} type="button"
+                    onClick={() => { onChange(cap); setOpen(false); }}
+                    className={clsx(
+                      'w-full text-left px-4 py-2.5 text-xs border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors',
+                      value === cap && 'bg-primary-50'
+                    )}
+                  >
+                    <span className="font-medium text-gray-800">{cap}</span>
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+          <div className="p-2 border-t border-gray-100">
+            <button type="button"
+              onClick={() => { setOpen(false); onAddNew(); }}
+              className="w-full flex items-center gap-2 text-xs text-primary-600 hover:bg-primary-50 px-2 py-1.5 rounded-lg transition-colors"
+            >
+              <Plus size={12}/> Add new capacity
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── New Capacity Modal ────────────────────────────────────────────────────────
+function NewCapacityModal({ onConfirm, onClose }) {
+  const [value, setValue] = useState('');
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/30 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 text-sm">Add New Capacity</h3>
+          <button type="button" onClick={onClose}><X size={16} className="text-gray-400"/></button>
+        </div>
+        <input
+          autoFocus
+          className="input text-sm"
+          placeholder="e.g. 75 Ton, 20ft, 500L"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && value.trim()) { onConfirm(value.trim()); } }}
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary text-xs">Cancel</button>
+          <button
+            type="button"
+            disabled={!value.trim()}
+            onClick={() => value.trim() && onConfirm(value.trim())}
+            className="btn-primary text-xs"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -461,10 +578,11 @@ export default function ProcurementPage() {
   const [formLoading, setFormLoading] = useState(false);
 
   // modal: null | 'proc' | 'po' | 'vendor' | 'vendor-inline' | 'receive' | 'new-eq-type'
-  const [showModal,   setShowModal]   = useState(null);
-  const [selected,    setSelected]    = useState(null);
-  const [previewPO,   setPreviewPO]   = useState(null);
-  const [previewProc, setPreviewProc] = useState(null);
+  const [showModal,        setShowModal]        = useState(null);
+  const [selected,         setSelected]         = useState(null);
+  const [previewPO,        setPreviewPO]        = useState(null);
+  const [previewProc,      setPreviewProc]      = useState(null);
+  const [newCapacityForIdx, setNewCapacityForIdx] = useState(null); // item idx waiting for new capacity
 
   const canWrite   = hasPermission(role, 'procurement_create');
   const canApprove = hasPermission(role, 'procurement_approve');
@@ -525,7 +643,7 @@ export default function ProcurementPage() {
   const openProcEdit = (p) => {
     setProcForm({ title:p.title, description:p.description??'', type:p.type, vendor_id:p.vendor_id??'', priority:p.priority??'Normal', required_by_date:p.required_by_date??'', lease_start_date:p.lease_start_date??'', lease_end_date:p.lease_end_date??'', lease_monthly_kwd:p.lease_monthly_kwd??'', terms_conditions:p.terms_conditions??'', notes:p.notes??'', status:p.status });
     setProcItems(p.procurement_items?.length > 0
-      ? p.procurement_items.map(i => ({ description:i.description, quantity:i.quantity, unit:i.unit, unit_price_kwd:i.unit_price_kwd, equipment_type_id:i.equipment_type_id??'' }))
+      ? p.procurement_items.map(i => ({ description:i.description, capacity:i.description, quantity:i.quantity, unit:i.unit, unit_price_kwd:i.unit_price_kwd, equipment_type_id:i.equipment_type_id??'' }))
       : [{ ...EMPTY_ITEM }]);
     setSelected(p);
     setShowModal('proc');
@@ -533,23 +651,55 @@ export default function ProcurementPage() {
 
   const handleProcSave = async (e) => {
     e.preventDefault();
-    if (!procForm.title.trim())              return toast.error('Enter procurement title');
-    if (procItems.some(i => !i.description)) return toast.error('Fill all item descriptions');
+    if (!procForm.title.trim()) return toast.error('Enter procurement title');
+    if (procItems.some(i => !i.equipment_type_id)) return toast.error('Select an equipment type for every item');
+    if (procItems.some(i => !i.capacity)) return toast.error('Select a capacity for every item');
+
+    // Find the type name for each item to build a readable description
+    const typeMap = Object.fromEntries(eqTypes.map(t => [t.type_id, t.name]));
+
+    // Strip UI-only `capacity` field — procurement_items has no capacity column.
+    // Store it as the description so it flows through to equipment_units.capacity on receive.
+    const itemsToSave = procItems.map(({ capacity, ...rest }) => ({
+      ...rest,
+      description: capacity === 'N/A'
+        ? (typeMap[rest.equipment_type_id] ?? rest.description ?? '')
+        : `${typeMap[rest.equipment_type_id] ?? ''} — ${capacity}`.trim(),
+      equipment_type_id: rest.equipment_type_id || null,
+    }));
     setFormLoading(true);
     try {
       if (selected) {
-        await updateProcurement(selected.procurement_id, procForm);
+        await updateProcurement(selected.procurement_id, {
+          ...procForm,
+          required_by_date:  procForm.required_by_date  || null,
+          lease_start_date:  procForm.lease_start_date  || null,
+          lease_end_date:    procForm.lease_end_date     || null,
+          lease_monthly_kwd: procForm.lease_monthly_kwd || null,
+          vendor_id:         procForm.vendor_id          || null,
+        });
         await supabase.from('procurement_items').delete().eq('procurement_id', selected.procurement_id);
-        if (procItems.length > 0) {
+        if (itemsToSave.length > 0) {
           await supabase.from('procurement_items').insert(
-            procItems.map(i => ({ ...i, procurement_id: selected.procurement_id, equipment_type_id: i.equipment_type_id || null }))
+            itemsToSave.map(({ description, unit_price_kwd, equipment_type_id }) => ({
+              description, unit_price_kwd, equipment_type_id,
+              procurement_id: selected.procurement_id,
+            }))
           );
         }
         toast.success('Procurement updated');
       } else {
         await createProcurement(
-          { ...procForm, requested_by: profile.user_id },
-          procItems.map(i => ({ ...i, equipment_type_id: i.equipment_type_id || null }))
+          {
+            ...procForm,
+            requested_by:      profile.user_id,
+            required_by_date:  procForm.required_by_date  || null,
+            lease_start_date:  procForm.lease_start_date  || null,
+            lease_end_date:    procForm.lease_end_date     || null,
+            lease_monthly_kwd: procForm.lease_monthly_kwd || null,
+            vendor_id:         procForm.vendor_id          || null,
+          },
+          itemsToSave
         );
         toast.success('Procurement request created');
       }
@@ -586,22 +736,52 @@ export default function ProcurementPage() {
       received_qty:      item.quantity,
       received_date:     new Date().toISOString().split('T')[0],
       fleet_location:    'Yard',
+      daily_rate_kwd:    0,
       procurement_type:  proc.type ?? 'Purchase',
       lease_start:       proc.lease_start_date ?? '',
       lease_end:         proc.lease_end_date   ?? '',
+      // One serial number entry per unit — filled in by user
+      serial_numbers:    Array.from({ length: item.quantity }, () => ''),
     })));
     setShowModal('receive');
   };
 
   const handleReceive = async (e) => {
     e.preventDefault();
+
+    // Validate daily rate — required for all items with equipment types
+    for (const item of receiveItems) {
+      if (!item.equipment_type_id) continue;
+      if (!item.daily_rate_kwd || Number(item.daily_rate_kwd) <= 0) {
+        return toast.error(`Enter a daily rate for: ${item.description}`);
+      }
+    }
+
+    // Validate serial numbers — must be unique and non-empty for items with equipment types
+    const allSerials = [];
+    for (const item of receiveItems) {
+      if (!item.equipment_type_id) continue;
+      const count = item.received_qty;
+      for (let i = 0; i < count; i++) {
+        const serial = item.serial_numbers?.[i]?.trim() ?? '';
+        if (!serial) return toast.error(`Enter serial number for all units of: ${item.description}`);
+        if (allSerials.includes(serial)) return toast.error(`Duplicate serial number "${serial}" — each unit must have a unique serial`);
+        allSerials.push(serial);
+      }
+    }
+
     setFormLoading(true);
     try {
       await receiveProcurement(selected.procurement_id, receiveItems, profile.user_id);
       toast.success('Procurement received — items added to equipment fleet');
       setShowModal(null);
       loadAll();
-    } catch (err) { toast.error(err.message || 'Failed to receive');
+    } catch (err) {
+      if (err.message?.includes('serial_number') || err.code === '23505') {
+        toast.error('One or more serial numbers already exist in the fleet. Please check and use unique serial numbers.');
+      } else {
+        toast.error(err.message || 'Failed to receive');
+      }
     } finally { setFormLoading(false); }
   };
 
@@ -642,8 +822,18 @@ export default function ProcurementPage() {
   };
 
   const handleDelivered = async (po) => {
-    try { await updatePurchaseOrder(po.po_id, { status:'Delivered', actual_delivery: new Date().toISOString().split('T')[0] }); toast.success('Marked delivered'); loadAll(); }
-    catch { toast.error('Failed'); }
+    try {
+      await updatePurchaseOrder(po.po_id, {
+        status: 'Delivered',
+        actual_delivery: new Date().toISOString().split('T')[0],
+      });
+      // Also mark the linked procurement as Delivered so Receive button appears
+      if (po.procurement_id) {
+        await updateProcurement(po.procurement_id, { status: 'Delivered' });
+      }
+      toast.success('Marked as delivered — you can now receive items in the Requests tab');
+      loadAll();
+    } catch { toast.error('Failed to mark as delivered'); }
   };
 
   // ── Vendor ────────────────────────────────────────────────────────────────
@@ -676,7 +866,7 @@ export default function ProcurementPage() {
   const setProcItem = (idx, field, val) =>
     setProcItems(items => items.map((item, i) => i === idx ? { ...item, [field]: val } : item));
 
-  const procTotal = procItems.reduce((s, i) => s + Number(i.quantity || 0) * Number(i.unit_price_kwd || 0), 0);
+  const procTotal = procItems.reduce((s, i) => s + Number(i.unit_price_kwd || 0), 0);
 
   return (
     <div className="space-y-4">
@@ -729,6 +919,16 @@ export default function ProcurementPage() {
                     <tbody className="divide-y divide-gray-50">
                       {procs.map(p => {
                         const linkedPO = pos.find(po => po.procurement_id === p.procurement_id);
+                        // Show Receive button when:
+                        //  1. Procurement itself is 'Delivered', OR
+                        //  2. The linked PO status is 'Delivered' (in case procurement wasn't synced)
+                        // And not already Received
+                        const poIsDelivered = linkedPO?.status === 'Delivered';
+                        const canReceive = canWrite &&
+                          p.status !== 'Received' &&
+                          p.status !== 'Cancelled' &&
+                          p.status !== 'Rejected' &&
+                          (p.status === 'Delivered' || poIsDelivered);
                         return (
                           <tr key={p.procurement_id} className="hover:bg-gray-50">
                             <td className="px-5 py-3 font-mono text-xs text-gray-400">{p.procurement_id}</td>
@@ -754,6 +954,9 @@ export default function ProcurementPage() {
                                 <button onClick={() => setPreviewPO(linkedPO)}
                                   className="flex items-center gap-1 text-xs text-primary-600 hover:underline font-mono">
                                   <Eye size={11}/> {linkedPO.po_number}
+                                  {poIsDelivered && (
+                                    <span className="ml-1 text-green-600 font-sans">✓</span>
+                                  )}
                                 </button>
                               ) : <span className="text-gray-300 text-xs">No PO</span>}
                             </td>
@@ -778,11 +981,16 @@ export default function ProcurementPage() {
                                 {canPO && p.status === 'Approved' && (
                                   <button onClick={() => openPOAdd(p)} className="text-xs bg-purple-500 text-white px-2 py-1 rounded-lg">→ PO</button>
                                 )}
-                                {canWrite && ['Delivered','PO Issued'].includes(p.status) && (
+                                {canReceive && (
                                   <button onClick={() => openReceive(p)}
-                                    className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1">
+                                    className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1 font-medium shadow-sm">
                                     <Package size={11}/> Receive
                                   </button>
+                                )}
+                                {p.status === 'Received' && (
+                                  <span className="text-xs text-green-600 flex items-center gap-1">
+                                    <CheckCircle size={12}/> Received
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -797,6 +1005,12 @@ export default function ProcurementPage() {
                 <div className="md:hidden space-y-3">
                   {procs.map(p => {
                     const linkedPO = pos.find(po => po.procurement_id === p.procurement_id);
+                    const poIsDelivered = linkedPO?.status === 'Delivered';
+                    const canReceive = canWrite &&
+                      p.status !== 'Received' &&
+                      p.status !== 'Cancelled' &&
+                      p.status !== 'Rejected' &&
+                      (p.status === 'Delivered' || poIsDelivered);
                     return (
                       <div key={p.procurement_id} className="card p-4">
                         <div className="flex justify-between items-start mb-1">
@@ -808,6 +1022,7 @@ export default function ProcurementPage() {
                         {linkedPO && (
                           <button onClick={() => setPreviewPO(linkedPO)} className="text-xs text-primary-600 flex items-center gap-1 mt-1">
                             <Eye size={11}/> {linkedPO.po_number}
+                            {poIsDelivered && <span className="text-green-600">✓ Delivered</span>}
                           </button>
                         )}
                         <p className="text-sm font-semibold text-gray-700 mt-1">KWD {Number(p.total_amount_kwd).toLocaleString()}</p>
@@ -816,8 +1031,15 @@ export default function ProcurementPage() {
                           {canWrite && p.status === 'Draft' && <button onClick={() => handleProcSubmit(p.procurement_id)} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-lg">Submit</button>}
                           {canApprove && p.status === 'Pending Approval' && <button onClick={() => handleProcApprove(p.procurement_id, true)} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg">Approve</button>}
                           {canPO && p.status === 'Approved' && <button onClick={() => openPOAdd(p)} className="text-xs bg-purple-500 text-white px-3 py-1 rounded-lg">Create PO</button>}
-                          {canWrite && ['Delivered','PO Issued'].includes(p.status) && (
-                            <button onClick={() => openReceive(p)} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg">Receive</button>
+                          {canReceive && (
+                            <button onClick={() => openReceive(p)} className="text-xs bg-green-500 text-white px-3 py-1 rounded-lg flex items-center gap-1 font-medium">
+                              <Package size={11}/> Receive
+                            </button>
+                          )}
+                          {p.status === 'Received' && (
+                            <span className="text-xs text-green-600 flex items-center gap-1 px-2 py-1 bg-green-50 rounded-lg">
+                              <CheckCircle size={12}/> Received
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1033,53 +1255,63 @@ export default function ProcurementPage() {
                     <div key={idx} className="border border-gray-100 rounded-xl p-4 bg-gray-50/30 space-y-3">
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-medium text-gray-500">Item {idx + 1}</p>
-                        <button type="button" onClick={() => removeProcItem(idx)}
-                          className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                        <div className="flex items-center gap-2">
+                          {/* Duplicate button */}
+                          <button
+                            type="button"
+                            title="Duplicate item"
+                            onClick={() => setProcItems(items => {
+                              const copy = [...items];
+                              copy.splice(idx + 1, 0, { ...item });
+                              return copy;
+                            })}
+                            className="text-xs text-primary-500 hover:text-primary-700 px-2 py-0.5 rounded-lg border border-primary-200 hover:bg-primary-50 transition-colors"
+                          >
+                            + Duplicate
+                          </button>
+                          <button type="button" onClick={() => removeProcItem(idx)}
+                            className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                        </div>
                       </div>
 
                       {/* Equipment type — searchable */}
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">Equipment Type (optional)</label>
+                        <label className="block text-xs text-gray-500 mb-1">Equipment Type *</label>
                         <EqTypeSelector
                           value={item.equipment_type_id}
                           eqTypes={eqTypes}
-                          onChange={val => setProcItem(idx, 'equipment_type_id', val)}
+                          onChange={val => setProcItems(items => items.map((it, i) =>
+                            i === idx ? { ...it, equipment_type_id: val, capacity: '' } : it
+                          ))}
                           onAddNew={() => setShowModal('new-eq-type')}
                         />
                       </div>
 
-                      {/* Description + Qty + Unit + Price */}
+                      {/* Capacity selector — shown once type is picked */}
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Capacity {item.equipment_type_id ? '*' : <span className="text-gray-300">(select type first)</span>}
+                        </label>
+                        <CapacitySelector
+                          typeId={item.equipment_type_id}
+                          value={item.capacity}
+                          onChange={val => setProcItems(items => items.map((it, i) =>
+                            i === idx ? { ...it, capacity: val } : it
+                          ))}
+                          onAddNew={() => setNewCapacityForIdx(idx)}
+                        />
+                      </div>
+
+                      {/* Unit Price only — qty and unit removed as per requirements */}
                       <div className="grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-12 sm:col-span-5">
-                          <label className="block text-xs text-gray-500 mb-1">Description *</label>
-                          <input className="input text-sm" placeholder="e.g. 50 Ton Forklift" value={item.description}
-                            onChange={e => setProcItem(idx, 'description', e.target.value)} required/>
-                        </div>
-                        <div className="col-span-3 sm:col-span-2">
-                          <label className="block text-xs text-gray-500 mb-1">Qty</label>
-                          <input
-                            type="number" min="1"
-                            className="input text-sm text-center w-full"
-                            value={item.quantity}
-                            onChange={e => setProcItem(idx, 'quantity', e.target.value)}
-                          />
-                        </div>
-                        <div className="col-span-4 sm:col-span-2">
-                          <label className="block text-xs text-gray-500 mb-1">Unit</label>
-                          <select className="input text-sm" value={item.unit}
-                            onChange={e => setProcItem(idx, 'unit', e.target.value)}>
-                            {['Unit','Set','Lot','Month','Day'].map(u => <option key={u}>{u}</option>)}
-                          </select>
-                        </div>
-                        <div className="col-span-5 sm:col-span-3">
+                        <div className="col-span-7 sm:col-span-8">
                           <label className="block text-xs text-gray-500 mb-1">Unit Price (KWD)</label>
                           <input type="number" min="0" step="0.001" className="input text-sm" placeholder="0.000"
                             value={item.unit_price_kwd} onChange={e => setProcItem(idx, 'unit_price_kwd', e.target.value)}/>
                         </div>
-                      </div>
-
-                      <div className="text-right text-xs font-medium text-gray-500">
-                        Line: KWD {(Number(item.quantity || 0) * Number(item.unit_price_kwd || 0)).toLocaleString('en-US', { minimumFractionDigits: 3 })}
+                        <div className="col-span-5 sm:col-span-4 text-right text-xs font-medium text-gray-500 pb-2">
+                          KWD {Number(item.unit_price_kwd || 0).toLocaleString('en-US', { minimumFractionDigits: 3 })}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1143,7 +1375,15 @@ export default function ProcurementPage() {
                         <label className="block text-xs text-gray-500 mb-1">Received Qty (of {item.quantity})</label>
                         <input type="number" min="0" max={item.quantity} className="input text-sm"
                           value={item.received_qty}
-                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, received_qty: Number(e.target.value)} : it))}/>
+                          onChange={e => {
+                            const qty = Math.max(0, Math.min(Number(e.target.value), item.quantity));
+                            setReceiveItems(items => items.map((it, i) => {
+                              if (i !== idx) return it;
+                              // Resize serial_numbers array to match new qty
+                              const serials = Array.from({ length: qty }, (_, si) => it.serial_numbers?.[si] ?? '');
+                              return { ...it, received_qty: qty, serial_numbers: serials };
+                            }));
+                          }}/>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Received Date</label>
@@ -1154,6 +1394,12 @@ export default function ProcurementPage() {
                         <label className="block text-xs text-gray-500 mb-1">Fleet Location</label>
                         <input className="input text-sm" placeholder="e.g. Ahmadi Depot" value={item.fleet_location}
                           onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, fleet_location: e.target.value} : it))}/>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Daily Rate (KWD/day) *</label>
+                        <input type="number" min="0" step="0.001" className="input text-sm" placeholder="0.000"
+                          value={item.daily_rate_kwd}
+                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, daily_rate_kwd: e.target.value} : it))}/>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Type</label>
@@ -1178,6 +1424,35 @@ export default function ProcurementPage() {
                         </>
                       )}
                     </div>
+
+                    {/* Serial numbers — one per unit */}
+                    {item.equipment_type_id && item.received_qty > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
+                          Serial Numbers <span className="text-red-500">*</span>
+                          <span className="text-gray-400 font-normal">(one per unit — must be unique)</span>
+                        </p>
+                        <div className="space-y-1.5">
+                          {Array.from({ length: item.received_qty }).map((_, unitIdx) => (
+                            <div key={unitIdx} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400 w-14 shrink-0">Unit {unitIdx + 1}</span>
+                              <input
+                                className="input text-sm flex-1"
+                                placeholder={`Serial number for unit ${unitIdx + 1}`}
+                                value={item.serial_numbers?.[unitIdx] ?? ''}
+                                onChange={e => setReceiveItems(items => items.map((it, i) => {
+                                  if (i !== idx) return it;
+                                  const serials = [...(it.serial_numbers ?? [])];
+                                  serials[unitIdx] = e.target.value;
+                                  return { ...it, serial_numbers: serials };
+                                }))}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {!item.equipment_type_id && (
                       <p className="text-xs text-yellow-600 bg-yellow-50 px-3 py-2 rounded-lg">
                         ⚠ No equipment type linked — item will be marked received but won't auto-add to fleet.
@@ -1288,6 +1563,19 @@ export default function ProcurementPage() {
           onClose={() => setShowModal('proc')}
           formLoading={formLoading}
           setFormLoading={setFormLoading}
+        />
+      )}
+
+      {/* ── New Capacity Modal ── */}
+      {newCapacityForIdx !== null && (
+        <NewCapacityModal
+          onConfirm={(cap) => {
+            setProcItems(items => items.map((it, i) =>
+              i === newCapacityForIdx ? { ...it, capacity: cap } : it
+            ));
+            setNewCapacityForIdx(null);
+          }}
+          onClose={() => setNewCapacityForIdx(null)}
         />
       )}
 
