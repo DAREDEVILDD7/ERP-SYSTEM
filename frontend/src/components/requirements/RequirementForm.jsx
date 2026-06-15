@@ -242,7 +242,7 @@ export default function RequirementForm({ existing, onSuccess, onCancel }) {
     : [];
 
   const [form,  setForm,  clearDraft,      hasDraft]      = useDraft(draftKey, INIT_FORM);
-  const [items, setItems, clearItemsDraft, hasItemsDraft] = useDraft(`${draftKey}-items`, INIT_ITEMS);
+  const [items, setItems, clearItemsDraft] = useDraft(`${draftKey}-items`, INIT_ITEMS);
 
   useEffect(() => {
     setDataLoading(true);
