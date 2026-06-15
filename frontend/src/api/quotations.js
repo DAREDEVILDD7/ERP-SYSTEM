@@ -98,9 +98,45 @@ export async function createQuotation(payload, items) {
     if (error) throw error;
 
     if (items?.length > 0) {
+      // The form already supplies the correct unit_rate_kwd for equipment items,
+      // but we optionally re-confirm the rate from the DB for safety.
+      const equipmentIds = items.map(i => i.equipment_id).filter(Boolean);
+      let rateMap = {};
+      if (equipmentIds.length > 0) {
+        const { data: eqData } = await supabase
+          .from('equipment_units')
+          .select('equipment_id, daily_rate_kwd')
+          .in('equipment_id', equipmentIds);
+        rateMap = Object.fromEntries(
+          (eqData ?? []).map(e => [e.equipment_id, e.daily_rate_kwd])
+        );
+      }
+
+      // Build rows using ONLY columns that exist in quotation_items.
+      // item_type  → not a DB column (UI-only); excluded.
+      // total_kwd  → DB DEFAULT (quantity * unit_rate_kwd); let DB compute it.
+      // procurement_id → not a DB column; excluded.
+      const rows = items.map(item => {
+        const confirmedRate = item.equipment_id && rateMap[item.equipment_id] != null
+          ? Number(rateMap[item.equipment_id])
+          : Number(item.unit_rate_kwd ?? 0);
+
+        return {
+          quotation_id:      quotation.quotation_id,
+          description:       (item.description ?? '').trim(),
+          quantity:          Number(item.quantity)  || 1,
+          unit:              item.unit              ?? 'Days',
+          unit_rate_kwd:     confirmedRate,
+          equipment_id:      item.equipment_id      || null,
+          rental_start_date: item.rental_start_date || null,
+          rental_end_date:   item.rental_end_date   || null,
+          discount_amount:   Number(item.discount_amount ?? 0),
+        };
+      });
+
       const { error: itemsError } = await supabase
         .from('quotation_items')
-        .insert(items.map(item => ({ ...item, quotation_id: quotation.quotation_id })));
+        .insert(rows);
       if (itemsError) throw itemsError;
     }
 
@@ -121,13 +157,20 @@ export async function createQuotation(payload, items) {
 }
 
 export async function updateQuotation(id, payload) {
+  // Strip any fields that shouldn't be sent to avoid type errors
+  const { users, approver, requirements, customers, quotation_items, ...cleanPayload } = payload;
+
   const { data, error } = await supabase
-    .from("quotations")
-    .update(payload)
-    .eq("quotation_id", id)
+    .from('quotations')
+    .update(cleanPayload)
+    .eq('quotation_id', id)
     .select()
     .single();
-  if (error) throw error;
+
+  if (error) {
+    console.error('[updateQuotation] Error:', error);
+    throw error;
+  }
   return data;
 }
 
@@ -139,9 +182,25 @@ export async function updateQuotationItems(quotationId, items) {
   if (deleteError) throw deleteError;
 
   if (items?.length > 0) {
+    // Explicitly pick only valid DB columns — never spread unknown fields.
+    const rows = items.map(item => ({
+      quotation_id:      quotationId,
+      description:       (item.description ?? '').trim(),
+      quantity:          Number(item.quantity)  || 1,
+      unit:              item.unit              ?? 'Days',
+      unit_rate_kwd:     Number(item.unit_rate_kwd ?? 0),
+      equipment_id:      item.equipment_id      || null,
+      rental_start_date: item.rental_start_date || null,
+      rental_end_date:   item.rental_end_date   || null,
+      discount_amount:   Number(item.discount_amount ?? 0),
+      // item_type  → not a DB column; excluded
+      // total_kwd  → DB DEFAULT; let DB compute it
+      // procurement_id → not a DB column; excluded
+    }));
+
     const { error: insertError } = await supabase
       .from("quotation_items")
-      .insert(items.map((i) => ({ ...i, quotation_id: quotationId })));
+      .insert(rows);
     if (insertError) throw insertError;
   }
 }

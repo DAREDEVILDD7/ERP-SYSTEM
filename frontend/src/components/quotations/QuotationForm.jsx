@@ -115,42 +115,90 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Load linked requirement details when requirement_id changes
+  // Load linked requirement details when requirement_id changes.
+  // Auto-populate is handled in a SEPARATE effect below so that
+  // equipment data is guaranteed to be loaded first.
   useEffect(() => {
     if (!form.requirement_id) { setLinkedReq(null); return; }
     setReqLoading(true);
     getRequirement(form.requirement_id)
       .then(req => {
         setLinkedReq(req);
-        // Auto-fill customer if not set
+        // Auto-fill customer if not already set
         if (!form.customer_id && req.customer_id) {
           setForm(f => ({ ...f, customer_id: req.customer_id }));
         }
-        // Auto-populate items from requirement items if items list is empty/default
-        if (req.requirement_items?.length > 0 && !isEdit) {
-          const reqItems = req.requirement_items.map(ri => ({
-            description:       ri.description,
-            quantity:          ri.quantity ?? 1,
-            unit:              'Days',
-            unit_rate_kwd:     '',
-            equipment_id:      null,
-            item_type:         'service',
-            procurement_id:    null,
-            rental_start_date: req.start_date ?? '',
-            rental_end_date:   req.end_date   ?? '',
-            discount_amount:   0,
-          }));
-          // Only replace if items is still the default single empty item
-          setItems(current => {
-            const isDefault = current.length === 1 &&
-              !current[0].description && !current[0].unit_rate_kwd;
-            return isDefault ? reqItems : current;
-          });
-        }
       })
-      .catch(() => {})
+      .catch(() => toast.error('Failed to load requirement details'))
       .finally(() => setReqLoading(false));
   }, [form.requirement_id]); // eslint-disable-line
+
+  // Auto-populate line items from the linked requirement.
+  // Runs after BOTH equipment data AND the requirement are available,
+  // avoiding the race condition where equipment array was still empty.
+  useEffect(() => {
+    if (dataLoading || !linkedReq || isEdit) return;
+    if (!linkedReq.requirement_items?.length || !equipment.length) return;
+
+    setItems(current => {
+      // Only replace the default blank item — never override work the user already did
+      const isDefault =
+        current.length === 1 &&
+        !current[0].description?.trim() &&
+        !current[0].unit_rate_kwd;
+      if (!isDefault) return current;
+
+      return linkedReq.requirement_items.map(ri => {
+        // Priority 1 — direct equipment_id reference (specific unit + serial number)
+        let matched = ri.equipment_id
+          ? (equipment.find(e => e.equipment_id === ri.equipment_id) ?? null)
+          : null;
+
+        // Priority 2 — match first available unit of the requested equipment type
+        if (!matched && ri.equipment_type_id) {
+          matched =
+            equipment.find(
+              e =>
+                (e.type_id ?? e.equipment_types?.type_id) === ri.equipment_type_id
+            ) ?? null;
+        }
+
+        if (matched) {
+          const typeName = matched.equipment_types?.name ?? '';
+          const capacity = matched.capacity ? ` ${matched.capacity}` : '';
+          const serial   = matched.serial_number
+            ? ` · S/N: ${matched.serial_number}`
+            : '';
+          return {
+            description:       `${typeName}${capacity}${serial} — Rental`.trim(),
+            quantity:          ri.quantity ?? 1,
+            unit:              'Days',
+            unit_rate_kwd:     matched.daily_rate_kwd ?? '',
+            equipment_id:      matched.equipment_id,
+            item_type:         'equipment',
+            procurement_id:    null,
+            rental_start_date: linkedReq.start_date ?? '',
+            rental_end_date:   linkedReq.end_date   ?? '',
+            discount_amount:   0,
+          };
+        }
+
+        // Fallback — no equipment match found; keep as a service/manual item
+        return {
+          description:       ri.description ?? '',
+          quantity:          ri.quantity ?? 1,
+          unit:              'Days',
+          unit_rate_kwd:     '',
+          equipment_id:      null,
+          item_type:         'service',
+          procurement_id:    null,
+          rental_start_date: linkedReq.start_date ?? '',
+          rental_end_date:   linkedReq.end_date   ?? '',
+          discount_amount:   0,
+        };
+      });
+    });
+  }, [dataLoading, linkedReq, equipment, isEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close customer dropdown on outside click
   useEffect(() => {
@@ -293,15 +341,21 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
         requirement_id:   form.requirement_id || null,
       };
 
-      const cleanItems = items.map(({ item_type, procurement_id, ...rest }) => ({
-        description:       rest.description,
-        quantity:          Number(rest.quantity),
-        unit:              rest.unit,
-        unit_rate_kwd:     Number(rest.unit_rate_kwd),
-        equipment_id:      rest.equipment_id || null,
-        rental_start_date: rest.rental_start_date || null,
-        rental_end_date:   rest.rental_end_date   || null,
-        discount_amount:   Number(rest.discount_amount || 0),
+      // Explicitly whitelist only columns that exist in quotation_items.
+      // item_type and procurement_id are UI-only; total_kwd is DB-computed.
+      // This guards against API functions accidentally spreading unknown fields.
+      const cleanItems = items.map(item => ({
+        description:       (item.description ?? '').trim(),
+        quantity:          Number(item.quantity)       || 1,
+        unit:              item.unit                   ?? 'Days',
+        unit_rate_kwd:     Number(item.unit_rate_kwd)  || 0,
+        equipment_id:      item.equipment_id           || null,
+        rental_start_date: item.rental_start_date      || null,
+        rental_end_date:   item.rental_end_date        || null,
+        discount_amount:   Number(item.discount_amount || 0),
+        // ⚠️  DO NOT add item_type   — column does not exist in quotation_items
+        // ⚠️  DO NOT add total_kwd   — DB DEFAULT: (quantity * unit_rate_kwd)
+        // ⚠️  DO NOT add procurement_id — UI-only field
       }));
 
       if (isEdit) {
@@ -518,7 +572,21 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
                 {linkedReq && !reqLoading && (
                   <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                     <CheckCircle size={11}/> Requirement loaded — details shown in panel
-                    {linkedReq.requirement_items?.length > 0 && ` · ${linkedReq.requirement_items.length} equipment items auto-populated`}
+                    {linkedReq.requirement_items?.length > 0 && (
+                      dataLoading
+                        ? ' · Matching equipment…'
+                        : (() => {
+                            const matched = linkedReq.requirement_items.filter(ri =>
+                              ri.equipment_id
+                                ? equipment.some(e => e.equipment_id === ri.equipment_id)
+                                : ri.equipment_type_id
+                                  ? equipment.some(e => (e.type_id ?? e.equipment_types?.type_id) === ri.equipment_type_id)
+                                  : false
+                            ).length;
+                            const total = linkedReq.requirement_items.length;
+                            return ` · ${matched}/${total} items matched to equipment${matched < total ? `, ${total - matched} as service` : ''}`;
+                          })()
+                    )}
                   </p>
                 )}
               </div>
