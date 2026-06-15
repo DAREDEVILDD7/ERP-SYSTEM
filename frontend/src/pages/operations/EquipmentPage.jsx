@@ -56,7 +56,8 @@ const ISSUE_TYPES = [
 ];
 
 export default function EquipmentPage() {
-  const { profile, role } = useAuth();
+  const { profile, role, loading: authLoading } = useAuth();
+
   const {
     equipmentUnits,
     equipmentTypes,
@@ -122,6 +123,7 @@ export default function EquipmentPage() {
 
   const load = useCallback(
     async (force = false) => {
+      if (authLoading || !profile || !role) return;
       if (equipmentLoaded && !force) return;
       setLoading(true);
       try {
@@ -137,7 +139,7 @@ export default function EquipmentPage() {
         setLoading(false);
       }
     },
-    [equipmentLoaded, setEquipmentUnits, setEquipmentTypes],
+    [authLoading, profile, role, equipmentLoaded, setEquipmentUnits, setEquipmentTypes],
   );
 
   useEffect(() => {

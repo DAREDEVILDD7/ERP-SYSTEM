@@ -9,85 +9,152 @@ import { supabase } from "../lib/supabaseClient";
 
 const AuthContext = createContext(null);
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const SESSION_KEY = "kwops_session"; // key used in sessionStorage
 
-  const fetchProfile = useCallback(async (authUser) => {
-    if (!authUser) {
-      setProfile(null);
-      setLoading(false);
-      return;
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function saveSession(profile) {
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(profile));
+  } catch (_) {}
+}
+
+function loadSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearSession() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch (_) {}
+}
+
+// ─── provider ───────────────────────────────────────────────────────────────
+
+export function AuthProvider({ children }) {
+  const [profile, setProfile] = useState(null);   // row from public.users (no password)
+  const [loading, setLoading] = useState(true);   // true while restoring session on mount
+  const [error,   setError]   = useState(null);
+
+  // Restore session on page refresh
+  useEffect(() => {
+    const saved = loadSession();
+    if (saved) {
+      setProfile(saved);
     }
-    try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("auth_id", authUser.id)
-        .single();
-      if (error) {
-        console.error("Profile error:", error);
-        setProfile(null);
-      } else {
-        setProfile(data);
-      }
-    } catch (err) {
-      console.error("Profile fetch failed:", err);
-      setProfile(null);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(false);
   }, []);
 
-  useEffect(() => {
-    // Listen FIRST — this fires immediately with current session
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log("onAuthStateChange:", _event, session?.user?.id ?? "null");
-      setUser(session?.user ?? null);
-      // Don't await here — let it run in background
-      fetchProfile(session?.user ?? null);
+  // ── login ─────────────────────────────────────────────────────────────────
+  const login = useCallback(async (username, password) => {
+    setError(null);
+
+    if (!username?.trim() || !password) {
+      throw new Error("Please enter your username and password.");
+    }
+
+    let data, error;
+
+    try {
+      ({ data, error } = await supabase.rpc("verify_login", {
+        p_username: username.trim().toLowerCase(),
+        p_password: password,
+      }));
+    } catch (networkErr) {
+      throw new Error("Network error. Please check your connection.");
+    }
+
+    if (error) {
+      console.error("verify_login RPC error:", error);
+      throw new Error("Login service unavailable. Please try again.");
+    }
+
+    // verify_login returns an empty array on bad credentials, one row on success
+    if (!data || data.length === 0) {
+      throw new Error("Invalid username or password.");
+    }
+
+    const userProfile = data[0];
+
+    if (!userProfile.is_active) {
+      throw new Error("Your account has been deactivated. Contact your administrator.");
+    }
+
+    // Fire-and-forget: log the login timestamp.
+    // supabase.rpc() returns a PostgrestBuilder (thenable, not a full Promise),
+    // so .catch() doesn't exist on it directly. Wrap in Promise.resolve() first.
+    Promise.resolve(
+      supabase.rpc("log_last_login", { p_user_id: userProfile.user_id })
+    ).catch(() => {});
+
+    setProfile(userProfile);
+    saveSession(userProfile);
+    return userProfile;
+  }, []);
+
+  // ── logout ────────────────────────────────────────────────────────────────
+  const logout = useCallback(() => {
+    setProfile(null);
+    clearSession();
+  }, []);
+
+  // ── change own password ───────────────────────────────────────────────────
+  const changePassword = useCallback(async (oldPassword, newPassword) => {
+    if (!profile) throw new Error("Not logged in.");
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error("New password must be at least 6 characters.");
+    }
+    if (oldPassword === newPassword) {
+      throw new Error("New password must be different from the current one.");
+    }
+
+    const { data, error } = await supabase.rpc("change_own_password", {
+      p_username:     profile.username,
+      p_old_password: oldPassword,
+      p_new_password: newPassword,
     });
 
-    return () => subscription.unsubscribe();
-  }, [fetchProfile]);
+    if (error) throw new Error(error.message || "Password change failed.");
+    if (!data)  throw new Error("Current password is incorrect.");
+    return true;
+  }, [profile]);
 
-  const login = async (username, password) => {
-    setError(null);
-    const { data: email, error: lookupError } = await supabase.rpc(
-      "get_email_by_username",
-      { p_username: username.trim().toLowerCase() },
-    );
-    if (lookupError || !email) throw new Error("Username not found.");
-    const { data, error: signInError } = await supabase.auth.signInWithPassword(
-      { email, password },
-    );
-    if (signInError) throw new Error("Incorrect password.");
+  // ── admin: reset any user's password ─────────────────────────────────────
+  const adminResetPassword = useCallback(async (userId, newPassword) => {
+    if (profile?.role !== "Admin") throw new Error("Admin access required.");
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error("Password must be at least 6 characters.");
+    }
+
+    const { data, error } = await supabase.rpc("set_user_password", {
+      p_user_id:      userId,
+      p_new_password: newPassword,
+    });
+
+    if (error) throw new Error(error.message || "Password reset failed.");
     return data;
-  };
+  }, [profile]);
 
-  const logout = async () => {
-    setLoading(true);
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
-    setLoading(false);
-  };
-
+  // ── context value ─────────────────────────────────────────────────────────
   return (
     <AuthContext.Provider
       value={{
-        user,
+        // Keep the same shape as before so all existing code keeps working
+        user:               profile,   // alias — components using `user` still work
         profile,
-        role: profile?.role ?? null,
+        role:               profile?.role ?? null,
         loading,
         error,
         login,
         logout,
-        isAdmin: profile?.role === "Admin",
+        changePassword,
+        adminResetPassword,
+        isAdmin:            profile?.role === "Admin",
       }}
     >
       {children}

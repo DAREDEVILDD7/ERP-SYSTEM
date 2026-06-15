@@ -36,7 +36,7 @@ function FilterPill({ label, onRemove }) {
 }
 
 export default function RequirementsPage() {
-  const { profile, role } = useAuth();
+  const { profile, role, loading: authLoading } = useAuth();
 
   const {
     requirements, requirementsLoaded, requirementsFilters,
@@ -55,6 +55,8 @@ export default function RequirementsPage() {
   const canReview = hasPermission(role, 'requirements_review');
 
   const load = useCallback(async (force = false) => {
+    // Don't fetch until auth session is restored — prevents stale empty-cache bug
+    if (authLoading || !profile || !role) return;
     if (requirementsLoaded && !force) return;
     setLoading(true);
     try {
@@ -62,12 +64,13 @@ export default function RequirementsPage() {
       if (role === 'Sales Executive') filters.created_by = profile.user_id;
       const data = await getRequirements(filters);
       setRequirements(data);
-    } catch {
+    } catch (err) {
+      console.error('Failed to load requirements:', err);
       toast.error('Failed to load requirements');
     } finally {
       setLoading(false);
     }
-  }, [requirementsLoaded, role, profile, setRequirements]);
+  }, [authLoading, requirementsLoaded, role, profile, setRequirements]);
 
   useEffect(() => { load(); }, [load]);
 

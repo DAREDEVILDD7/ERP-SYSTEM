@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   getMaintenanceJobs, createMaintenanceJob,
   updateMaintenanceJob, cancelMaintenanceJob, approveMaintenanceJob,
@@ -30,7 +30,8 @@ const EMPTY = {
 };
 
 export default function MaintenanceJobsPage() {
-  const { profile, role } = useAuth();
+  const { profile, role, loading: authLoading } = useAuth();
+
 
   const [jobs,         setJobs]         = useState([]);
   const [equipment,    setEquipment]    = useState([]);
@@ -54,6 +55,7 @@ export default function MaintenanceJobsPage() {
   const canApprove = hasPermission(role, 'maintenance_edit');
 
   const load = useCallback(async () => {
+    if (authLoading || !profile || !role) return;
     setLoading(true);
     try {
       const [j, e, u] = await Promise.all([
@@ -66,7 +68,7 @@ export default function MaintenanceJobsPage() {
       setEngineers(u.filter(u => ['Maintenance Engineer','Operations Manager','Admin'].includes(u.role)));
     } catch { toast.error('Failed to load maintenance jobs'); }
     finally { setLoading(false); }
-  }, [statusFilter]);
+  }, [authLoading, profile, role, statusFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -200,8 +202,8 @@ export default function MaintenanceJobsPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {jobs.map(j => (
-                  <>
-                    <tr key={j.maintenance_id}
+                  <React.Fragment key={j.maintenance_id}>
+                    <tr
                       className="hover:bg-gray-50 cursor-pointer"
                       onClick={() => setExpandedId(expandedId === j.maintenance_id ? null : j.maintenance_id)}>
                       <td className="px-3 py-3 text-gray-400 text-xs">{expandedId === j.maintenance_id ? '▲' : '▼'}</td>
@@ -262,7 +264,7 @@ export default function MaintenanceJobsPage() {
 
                     {/* Expanded row */}
                     {expandedId === j.maintenance_id && (
-                      <tr key={`${j.maintenance_id}-exp`} className="bg-gray-50/80">
+                      <tr className="bg-gray-50/80">
                         <td colSpan={canWrite ? 12 : 11} className="px-8 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                             {j.reporter && (
@@ -305,7 +307,7 @@ export default function MaintenanceJobsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
