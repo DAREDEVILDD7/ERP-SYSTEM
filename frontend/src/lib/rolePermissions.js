@@ -43,7 +43,7 @@ export const ROLE_NAV = {
 };
 
 export const PERMISSIONS = {
-  requirements_create:  [ROLES.ADMIN, ROLES.SALES],
+  requirements_create:  [ROLES.ADMIN, ROLES.SALES, ROLES.OPERATIONS],
   requirements_edit:    [ROLES.ADMIN, ROLES.SALES, ROLES.OPERATIONS],
   requirements_review:  [ROLES.ADMIN, ROLES.OPERATIONS],
   requirements_view:    Object.values(ROLES),

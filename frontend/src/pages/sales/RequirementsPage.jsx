@@ -61,6 +61,8 @@ export default function RequirementsPage() {
     setLoading(true);
     try {
       const filters = {};
+      // Sales Executive only sees their own requirements.
+      // All other roles (including Operations Manager and Admin) see everything.
       if (role === 'Sales Executive') filters.created_by = profile.user_id;
       const data = await getRequirements(filters);
       setRequirements(data);
@@ -71,6 +73,14 @@ export default function RequirementsPage() {
       setLoading(false);
     }
   }, [authLoading, requirementsLoaded, role, profile, setRequirements]);
+
+  // Clear the cache whenever the logged-in user changes.
+  // Without this, a Sales Executive's role-filtered cache persists in the
+  // Zustand store and is served to the next user who logs in (e.g. Operations),
+  // making them see only Sales-created rows instead of all requirements.
+  useEffect(() => {
+    if (profile?.user_id) clearRequirementsCache();
+  }, [profile?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
 

@@ -37,7 +37,8 @@ const STATUSES = [
 ];
 
 export default function QuotationsPage() {
-  const { profile, role } = useAuth();
+  const { profile, role, loading: authLoading } = useAuth();
+
   const location = useLocation();
 
   const {
@@ -89,6 +90,7 @@ export default function QuotationsPage() {
 
   const load = useCallback(
     async (force = false) => {
+      if (authLoading || !profile || !role) return;
       if (quotationsLoaded && !force) return;
       setLoading(true);
       try {
@@ -103,7 +105,7 @@ export default function QuotationsPage() {
         setLoading(false);
       }
     },
-    [quotationsLoaded, role, profile, status, setQuotations],
+    [authLoading, quotationsLoaded, role, profile, status, setQuotations],
   );
 
   useEffect(() => {
