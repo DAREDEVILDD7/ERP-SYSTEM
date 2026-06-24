@@ -94,3 +94,13 @@ export async function getCustomers() {
   if (error) throw error;
   return data ?? [];
 }
+
+export async function getEquipmentTypes() {
+  const { data, error } = await supabase
+    .from('equipment_types')
+    .select('type_id, name, category, description, default_capacity, unit')
+    .eq('is_active', true)
+    .order('name');
+  if (error) throw error;
+  return data ?? [];
+}

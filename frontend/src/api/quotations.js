@@ -97,6 +97,11 @@ export async function createQuotation(payload, items) {
       .single();
     if (error) throw error;
 
+    // Items that need procurement — detected from the UI-only `item_type`
+    // field on the ORIGINAL items array (not present in DB rows). Captured
+    // before the DB-insert rows are built, since that step strips item_type.
+    const procurementItemsNeeded = (items ?? []).filter(i => i.item_type === 'procurement');
+
     if (items?.length > 0) {
       // The form already supplies the correct unit_rate_kwd for equipment items,
       // but we optionally re-confirm the rate from the DB for safety.
@@ -140,7 +145,7 @@ export async function createQuotation(payload, items) {
       if (itemsError) throw itemsError;
     }
 
-    // Post system message to requirement chat thread
+    // Post system message to requirement chat thread — quote created
     if (payload.requirement_id && payload.prepared_by) {
       await postQuoteCreatedChatMessage(
         quotation.quotation_id,
@@ -150,10 +155,117 @@ export async function createQuotation(payload, items) {
       );
     }
 
+    // Auto-create a procurement request for any line items that aren't
+    // currently available in the fleet (item_type === 'procurement').
+    // This is best-effort: if it fails, the quotation itself has already
+    // been saved successfully, so we log and continue rather than throwing —
+    // a failed side-effect here should never roll back a valid quotation.
+    if (procurementItemsNeeded.length > 0) {
+      try {
+        const procurement = await createProcurementRequestForQuotation(
+          quotation, procurementItemsNeeded, payload.requirement_id, payload.prepared_by
+        );
+        if (procurement && payload.requirement_id && payload.prepared_by) {
+          await postProcurementRequestedChatMessage(
+            procurement.procurement_id,
+            quotation.quotation_id,
+            payload.requirement_id,
+            payload.prepared_by,
+            procurementItemsNeeded.length
+          );
+        }
+        quotation._procurementCreated = !!procurement;
+        quotation._procurementItemCount = procurementItemsNeeded.length;
+      } catch (procErr) {
+        console.error('Failed to auto-create procurement request (quotation was still saved):', procErr);
+        quotation._procurementCreated = false;
+        quotation._procurementItemCount = procurementItemsNeeded.length;
+      }
+    }
+
     return quotation;
   } finally {
     _creating = false;
   }
+}
+
+// ─── Procurement auto-request pipeline ───────────────────────────────────────
+// Triggered automatically whenever a new quotation is created with one or
+// more line items flagged as item_type: 'procurement' (i.e. equipment that
+// isn't currently in the fleet). Bundles all such items from the same
+// quotation into a single procurement request for the Procurement Manager
+// to review, source a vendor, and raise a purchase order against.
+
+async function createProcurementRequestForQuotation(quotation, procurementItems, requirementId, preparedBy) {
+  if (!procurementItems?.length) return null;
+
+  // Use the earliest rental start date among the procurement items as the
+  // "required by" date — the soonest the customer actually needs something.
+  const earliestDate = procurementItems
+    .map(i => i.rental_start_date)
+    .filter(Boolean)
+    .sort()[0] ?? null;
+
+  const itemSummaries = procurementItems
+    .map(i => `${i.description} (qty ${Number(i.quantity) || 1})`)
+    .join('; ');
+
+  const { data: procurement, error } = await supabase
+    .from('procurements')
+    .insert({
+      title:           `Procurement for Quotation ${quotation.quotation_id}`,
+      description:     `Auto-generated from quotation ${quotation.quotation_id}` +
+                        `${requirementId ? ` (requirement ${requirementId})` : ''}. ` +
+                        `${procurementItems.length} item(s) not currently in fleet: ${itemSummaries}`,
+      type:            'Purchase',
+      requested_by:    preparedBy || null,
+      status:          'Draft',
+      priority:        'Normal',
+      required_by_date: earliestDate,
+      notes:           `Linked quotation: ${quotation.quotation_id}` +
+                        `${requirementId ? ` · Linked requirement: ${requirementId}` : ''}`,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to create procurement request:', error);
+    return null;
+  }
+
+  const itemRows = procurementItems.map(item => ({
+    procurement_id:     procurement.procurement_id,
+    description:        item.description,
+    quantity:            Number(item.quantity) || 1,
+    unit:                item.unit ?? 'Days',
+    unit_price_kwd:      Number(item.unit_rate_kwd) || 0,
+    procurement_type:   'Purchase',
+    capacity:            item.capacity || null,
+    requested_capacity:  item.capacity || null,
+  }));
+
+  const { error: itemsError } = await supabase.from('procurement_items').insert(itemRows);
+  if (itemsError) {
+    // The procurement header was created but items failed — log clearly so
+    // it can be found and fixed manually rather than silently losing data.
+    console.error(`Failed to create procurement_items for ${procurement.procurement_id}:`, itemsError);
+  }
+
+  return procurement;
+}
+
+export async function postProcurementRequestedChatMessage(procurementId, quotationId, requirementId, userId, itemCount) {
+  if (!requirementId) return;
+  const { error } = await supabase.from('chat_messages').insert({
+    related_requirement: requirementId,
+    sender_id:    userId,
+    department:   'Procurement',
+    message:      `Procurement Requested — ${procurementId} (${itemCount} item${itemCount !== 1 ? 's' : ''} from quotation ${quotationId})`,
+    message_type: 'procurement_ref',
+    ref_id:       procurementId,
+    ref_type:     'procurement',
+  });
+  if (error) console.error('Failed to post procurement chat message:', error);
 }
 
 export async function updateQuotation(id, payload) {
