@@ -1,38 +1,112 @@
 import { supabase } from '../lib/supabaseClient';
 
-// Creates a single dispatch for an entire quotation (all equipment items grouped together)
-// Call this on quotation approval instead of looping per-item
-export async function createDispatchFromQuotation(quotation, assignedBy) {
+// Creates ONE dispatch per quotation item on approval.
+// Items with a fleet equipment_id get a full dispatch + dispatch_item.
+// Items without an equipment_id are matched against available fleet units by
+// description/type — handles the case where procurement was received before
+// the quotation was approved (so the DB link was never written at receive-time).
+export async function createDispatchesFromQuotation(quotation, assignedBy) {
   if (!quotation?.quotation_id) throw new Error('Quotation is required');
 
-  // Collect all equipment IDs from quotation items
-  const equipmentIds = (quotation.quotation_items ?? [])
-    .filter(item => item.equipment_id)
-    .map(item => item.equipment_id);
+  const items = quotation.quotation_items ?? [];
+  if (items.length === 0) return { created: [], pendingProcurement: [], errors: [] };
 
-  if (equipmentIds.length === 0) {
-    console.warn('[createDispatchFromQuotation] No equipment items found in quotation');
-    return null;
+  const destination   = quotation.requirements?.location ?? '';
+  const requirementId = quotation.requirement_id ?? quotation.requirements?.requirement_id ?? null;
+
+  const created            = [];
+  const pendingProcurement = [];
+  const errors             = [];
+
+  // Pre-load fleet data once for any items that are still missing an equipment_id
+  const nullItems = items.filter(i => !i.equipment_id);
+  let equipmentTypes     = [];
+  let availableEquipment = [];
+  if (nullItems.length > 0) {
+    const [typesRes, eqRes] = await Promise.all([
+      supabase.from('equipment_types').select('type_id, name'),
+      supabase.from('equipment_units')
+        .select('equipment_id, type_id, capacity, status')
+        .in('status', ['Available', 'Reserved']),
+    ]);
+    equipmentTypes     = typesRes.data ?? [];
+    availableEquipment = eqRes.data   ?? [];
+  }
+  // Tracks units claimed within this approval pass to prevent double-assignment
+  const claimedIds = new Set();
+
+  for (const item of items) {
+    try {
+      let equipmentId = item.equipment_id ?? null;
+
+      // No fleet unit yet — attempt best-effort match by description prefix vs type name
+      if (!equipmentId) {
+        const descPart = (item.description || '').split(' — ')[0].trim().toLowerCase();
+        const matchedType = equipmentTypes.find(t => {
+          const tName = t.name.trim().toLowerCase();
+          return descPart === tName || descPart.startsWith(tName + ' ');
+        });
+        if (matchedType) {
+          const unit = availableEquipment.find(e =>
+            e.type_id === matchedType.type_id && !claimedIds.has(e.equipment_id)
+          );
+          if (unit) {
+            equipmentId = unit.equipment_id;
+            claimedIds.add(equipmentId);
+            // Persist the link so the quotation_item stays consistent
+            await supabase
+              .from('quotation_items')
+              .update({ equipment_id: equipmentId })
+              .eq('item_id', item.item_id);
+          }
+        }
+      }
+
+      if (equipmentId) {
+        // Idempotency: skip if a non-cancelled dispatch already exists for this pair
+        const { data: existing } = await supabase
+          .from('dispatches')
+          .select('dispatch_id')
+          .eq('quotation_id', quotation.quotation_id)
+          .eq('equipment_id', equipmentId)
+          .neq('status', 'Cancelled')
+          .limit(1);
+
+        if (existing?.length > 0) {
+          created.push({ dispatch: existing[0], item: { ...item, equipment_id: equipmentId } });
+        } else {
+          const dispatch = await createDispatch({
+            quotation_id:   quotation.quotation_id,
+            requirement_id: requirementId,
+            assigned_by:    assignedBy,
+            destination,
+            status:         'Pending',
+            dispatch_type:  'Full',
+            equipment_id:   equipmentId,
+            dispatch_date:  item.rental_start_date ?? null,
+            return_date:    item.rental_end_date   ?? null,
+            items_total:    1,
+            notes:          item.description ?? null,
+          }, [equipmentId]);
+          created.push({ dispatch, item: { ...item, equipment_id: equipmentId } });
+        }
+      } else {
+        // Still no match — equipment genuinely not in fleet yet
+        pendingProcurement.push({ item });
+      }
+    } catch (err) {
+      console.error('[createDispatchesFromQuotation] Failed for item:', item, err);
+      errors.push({ item, error: err.message ?? String(err) });
+    }
   }
 
-  const destination = quotation.requirements?.location ?? '';
-  const startDates  = (quotation.quotation_items ?? []).filter(i => i.rental_start_date).map(i => i.rental_start_date);
-  const endDates    = (quotation.quotation_items ?? []).filter(i => i.rental_end_date).map(i => i.rental_end_date);
+  return { created, pendingProcurement, errors };
+}
 
-  const payload = {
-    quotation_id:   quotation.quotation_id,
-    requirement_id: quotation.requirement_id ?? quotation.requirements?.requirement_id ?? null,
-    assigned_by:    assignedBy,
-    destination:    destination,
-    status:         'Pending',
-    dispatch_type:  'Full',
-    equipment_id:   equipmentIds[0], // primary equipment reference
-    dispatch_date:  startDates.length > 0 ? startDates[0] : null,
-    return_date:    endDates.length > 0 ? endDates[endDates.length - 1] : null,
-    items_total:    equipmentIds.length,
-  };
-
-  return createDispatch(payload, equipmentIds);
+// Legacy single-dispatch helper — kept for backwards compatibility
+export async function createDispatchFromQuotation(quotation, assignedBy) {
+  const result = await createDispatchesFromQuotation(quotation, assignedBy);
+  return result.created[0]?.dispatch ?? null;
 }
 
 export async function getDispatchesFast(filters = {}) {
@@ -144,6 +218,7 @@ export async function createDispatch(payload, equipmentIds = []) {
   const {
     assigner, cancelledByUser, quotationApprover,
     quotations, dispatch_items,
+    awaiting_equipment,   // not a DB column — conveyed via notes prefix
     ...cleanPayload
   } = payload;
 
@@ -157,7 +232,7 @@ export async function createDispatch(payload, equipmentIds = []) {
     .single();
 
   if (error) {
-    console.error('[createDispatch] Error:', error);
+    console.error('[createDispatch] Error:', error?.message, '|', error?.details, '| code:', error?.code);
     throw error;
   }
 

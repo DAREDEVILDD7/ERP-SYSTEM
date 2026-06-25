@@ -502,15 +502,17 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
           };
         }
 
-        // Fallback — type/capacity not in fleet → flag as procurement
-        const needsProcurement = !!ri.equipment_type_id;
+        // Fallback — type/capacity not in fleet → always procurement.
+        // Requirement items are either fleet-unit references or equipment-type
+        // requests; neither is a pure service, so unmatched items always need
+        // to be sourced (procurement), not treated as manual service lines.
         return {
           description:       ri.description ?? '',
           quantity:          ri.quantity ?? 1,
           unit:              'Days',
           unit_rate_kwd:     '',
           equipment_id:      null,
-          item_type:         needsProcurement ? 'procurement' : 'service',
+          item_type:         'procurement',
           rental_start_date: linkedReq.start_date ?? '',
           rental_end_date:   linkedReq.end_date   ?? '',
           discount_amount:   0,
@@ -561,7 +563,11 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
     }));
   };
 
-  const addItem    = () => setItems(i => [...i, { ...EMPTY_ITEM }]);
+  const addItem    = () => setItems(i => [...i, {
+    ...EMPTY_ITEM,
+    rental_start_date: linkedReq?.start_date ?? '',
+    rental_end_date:   linkedReq?.end_date   ?? '',
+  }]);
   const removeItem = (idx) => {
     if (items.length === 1) return toast.error('At least one item is required');
     setItems(i => i.filter((_, j) => j !== idx));
@@ -582,6 +588,10 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
       return eType === typeId && (e.capacity ?? null) === capacity;
     });
     const available = peers.filter(e => e.status === 'Available').length;
+    const reserved  = peers.filter(e => e.status === 'Reserved').length;
+    // Both Available and Reserved units can be allocated; reserved units are
+    // already committed but may be re-confirmed — caller must verify.
+    const total     = available + reserved;
 
     const usedInForm = items.filter(i => {
       if (!i.equipment_id) return false;
@@ -590,8 +600,9 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
       return e2Type === typeId && (e2?.capacity ?? null) === capacity;
     }).length;
 
-    const label = `${eq.equipment_types?.name ?? ''}${capacity ? ` ${capacity}` : ''}`.trim();
-    return { available, usedInForm, ok: usedInForm <= available, label };
+    const label          = `${eq.equipment_types?.name ?? ''}${capacity ? ` ${capacity}` : ''}`.trim();
+    const selectedStatus = eq.status ?? null;
+    return { available, reserved, total, usedInForm, ok: usedInForm <= total, label, selectedStatus };
   }, [equipment, items]);
 
   // ── Filtered lists ─────────────────────────────────────────────────────────
@@ -680,35 +691,27 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
 
       // cleanItems: explicit DB-only columns — used for the UPDATE path via
       // updateQuotationItems, which writes directly to quotation_items.
-      const cleanItems = items.map(item => {
-        const days = calcDays(item.rental_start_date, item.rental_end_date);
-        const qty  = days ?? Math.max(1, Number(item.quantity) || 1);
-        return {
-          description:       (item.description ?? '').trim(),
-          quantity:          qty,
-          unit:              days != null ? 'Days' : (item.unit ?? 'Days'),
-          unit_rate_kwd:     Number(item.unit_rate_kwd ?? 0),
-          equipment_id:      item.equipment_id || null,
-          rental_start_date: item.rental_start_date || null,
-          rental_end_date:   item.rental_end_date   || null,
-          discount_amount:   Number(item.discount_amount ?? 0),
-          // item_type, procurement_id → NOT DB columns; excluded
-          // total_kwd → DB DEFAULT; excluded
-        };
-      });
+      // quantity is always 1 per line item; duration is captured via rental dates
+      // and total_kwd is computed explicitly in the API layer (days × rate).
+      const cleanItems = items.map(item => ({
+        description:       (item.description ?? '').trim(),
+        quantity:          1,
+        unit:              item.unit ?? 'Days',
+        unit_rate_kwd:     Number(item.unit_rate_kwd ?? 0),
+        equipment_id:      item.equipment_id || null,
+        rental_start_date: item.rental_start_date || null,
+        rental_end_date:   item.rental_end_date   || null,
+        discount_amount:   Number(item.discount_amount ?? 0),
+      }));
 
-      // itemsForCreate: same date-computed quantity as cleanItems, but keeps
-      // item_type intact — createQuotation() needs it to detect which items
-      // require an auto-generated procurement request (item_type === 'procurement'),
-      // and strips it itself before the actual DB insert.
-      const itemsForCreate = items.map(item => {
-        const days = calcDays(item.rental_start_date, item.rental_end_date);
-        return {
-          ...item,
-          quantity: days ?? Math.max(1, Number(item.quantity) || 1),
-          unit:     days != null ? 'Days' : (item.unit ?? 'Days'),
-        };
-      });
+      // itemsForCreate: keeps item_type intact — createQuotation() needs it to
+      // detect which items require an auto-generated procurement request
+      // (item_type === 'procurement'), and strips it itself before the DB insert.
+      const itemsForCreate = items.map(item => ({
+        ...item,
+        quantity: 1,
+        unit:     item.unit ?? 'Days',
+      }));
 
       const procurementCount = items.filter(i => i.item_type === 'procurement').length;
 
@@ -1018,19 +1021,20 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
                     <div
                       key={idx}
                       className={clsx(
-                        'relative rounded-xl border p-4 space-y-3 transition-all duration-200',
+                        'relative rounded-xl border p-4 space-y-3 transition-all duration-200 group/item focus-within:ring-2 focus-within:ring-primary-200',
                         isOverStock
                           ? 'border-red-200 bg-red-50/50 shadow-sm shadow-red-100'
-                          : 'border-gray-100 bg-gray-50/30 hover:border-primary-200 hover:shadow-md'
+                          : 'border-gray-100 bg-gray-50/30 hover:border-primary-200 hover:shadow-lg hover:shadow-primary-50'
                       )}
                       style={{ animation: `fadeSlideIn 0.25s ease ${Math.min(idx, 6) * 40}ms both`, zIndex: items.length - idx }}
                     >
                       {/* Item header — sliding type switcher + remove */}
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-gray-400 w-5">#{idx + 1}</span>
+                        <span className="text-xs font-semibold text-primary-300 w-5 tabular-nums group-hover/item:text-primary-500 transition-colors duration-200">#{idx + 1}</span>
                         <ItemTypeSwitcher value={item.item_type} onChange={key => setItem(idx, 'item_type', key)}/>
                         <button type="button" onClick={() => removeItem(idx)}
-                          className="text-gray-300 hover:text-red-500 transition-all hover:scale-110 active:scale-95">
+                          className="text-gray-200 hover:text-red-500 hover:bg-red-50 rounded-lg p-1 transition-all duration-150 hover:scale-110 active:scale-95 ml-auto"
+                          title="Remove item">
                           <Trash2 size={15}/>
                         </button>
                       </div>
@@ -1079,26 +1083,43 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
                                   {filteredEquipment.length === 0 ? (
                                     <p className="text-xs text-gray-400 text-center py-4">No equipment found</p>
                                   ) : filteredEquipment.map((eq, i) => {
-                                    const eqTypeId   = eq.type_id ?? eq.equipment_types?.type_id;
-                                    const eqCapacity = eq.capacity ?? null;
-                                    const peers      = equipment.filter(e => (e.type_id ?? e.equipment_types?.type_id) === eqTypeId && (e.capacity ?? null) === eqCapacity);
-                                    const avail      = peers.filter(e => e.status === 'Available').length;
-                                    const isSelected = item.equipment_id === eq.equipment_id;
+                                    const eqTypeId      = eq.type_id ?? eq.equipment_types?.type_id;
+                                    const eqCapacity    = eq.capacity ?? null;
+                                    const peers         = equipment.filter(e => (e.type_id ?? e.equipment_types?.type_id) === eqTypeId && (e.capacity ?? null) === eqCapacity);
+                                    const avail         = peers.filter(e => e.status === 'Available').length;
+                                    const reservedCount = peers.filter(e => e.status === 'Reserved').length;
+                                    const totalUsable   = avail + reservedCount;
+                                    const isSelected    = item.equipment_id === eq.equipment_id;
+                                    const unitReserved  = eq.status === 'Reserved';
                                     return (
                                       <button key={eq.equipment_id} type="button"
                                         onClick={() => setItem(idx, 'equipment_id', eq.equipment_id)}
                                         style={{ animation: `fadeSlideIn 0.15s ease ${Math.min(i, 8) * 15}ms both` }}
-                                        className={clsx('w-full flex items-center justify-between px-4 py-2.5 text-left border-b border-gray-50 last:border-0 transition-colors text-xs',
-                                          isSelected ? 'bg-primary-50' : 'hover:bg-gray-50')}>
-                                        <div>
-                                          <p className="font-medium text-gray-800">{eq.equipment_types?.name} {eq.capacity ?? ''}</p>
+                                        className={clsx(
+                                          'w-full flex items-center justify-between px-4 py-2.5 text-left border-b border-gray-50 last:border-0 transition-all duration-150 text-xs group/eq',
+                                          isSelected ? 'bg-primary-50' : 'hover:bg-gray-50 hover:pl-5'
+                                        )}>
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-1.5 flex-wrap">
+                                            <p className="font-medium text-gray-800">{eq.equipment_types?.name} {eq.capacity ?? ''}</p>
+                                            {unitReserved && (
+                                              <span className="badge-reserved px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 leading-none">
+                                                Reserved
+                                              </span>
+                                            )}
+                                          </div>
                                           <p className="text-gray-400">{eq.equipment_id} · {eq.serial_number ?? 'No serial'} · {eq.location ?? '—'}</p>
                                         </div>
-                                        <div className="flex items-center gap-2 ml-3 shrink-0">
-                                          <span className={clsx('px-2 py-0.5 rounded-full text-xs font-medium',
-                                            avail === 0 ? 'bg-red-100 text-red-600' : avail === 1 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700')}>
+                                        <div className="flex items-center gap-1.5 ml-3 shrink-0">
+                                          <span className={clsx('px-2 py-0.5 rounded-full text-xs font-medium transition-all duration-200',
+                                            totalUsable === 0 ? 'bg-red-100 text-red-600' : avail <= 1 ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700')}>
                                             {avail} avail
                                           </span>
+                                          {reservedCount > 0 && (
+                                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 transition-all duration-200">
+                                              {reservedCount} rsv
+                                            </span>
+                                          )}
                                         </div>
                                       </button>
                                     );
@@ -1113,29 +1134,44 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
 
                           {/* Capacity-aware stock badge with shimmer bar */}
                           {stockInfo && (
-                            <div className={clsx(
-                              'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-300',
-                              stockInfo.ok ? 'bg-green-50 text-green-700' : 'bg-red-100 text-red-700'
-                            )} style={!stockInfo.ok ? { animation: 'pulseGlowRed 2s ease-in-out infinite' } : undefined}>
-                              {stockInfo.ok ? <CheckCircle size={12}/> : <AlertTriangle size={12}/>}
-                              <span>
-                                {stockInfo.available} unit{stockInfo.available !== 1 ? 's' : ''} available
-                                {stockInfo.label ? ` (${stockInfo.label})` : ''}
-                                {!stockInfo.ok && ` — you've used ${stockInfo.usedInForm}, only ${stockInfo.available} in fleet`}
-                              </span>
-                              <div className="ml-auto flex items-center gap-1 shrink-0">
-                                <div className="w-16 h-1.5 bg-white/70 rounded-full overflow-hidden relative">
-                                  <div
-                                    className={clsx('h-full rounded-full transition-all duration-500',
-                                      stockInfo.ok ? 'bg-gradient-to-r from-green-400 to-green-600' : 'bg-gradient-to-r from-red-400 to-red-600')}
-                                    style={{ width: `${Math.min(100, (stockInfo.available / Math.max(stockInfo.usedInForm, stockInfo.available, 1)) * 100)}%` }}
-                                  />
-                                  {stockInfo.ok && (
-                                    <div className="absolute inset-0 w-1/3" style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent)', animation: 'shimmerSlide 2s ease-in-out infinite' }}/>
+                            <div
+                              className={clsx(
+                                'rounded-lg text-xs font-medium transition-all duration-300 overflow-hidden',
+                                stockInfo.ok ? 'bg-green-50 text-green-700' : 'bg-red-100 text-red-700'
+                              )}
+                              style={{ animation: stockInfo.ok ? 'fadeSlideIn 0.2s ease' : 'pulseGlowRed 2s ease-in-out infinite' }}
+                            >
+                              <div className="flex items-center gap-2 px-3 py-1.5">
+                                {stockInfo.ok ? <CheckCircle size={12}/> : <AlertTriangle size={12}/>}
+                                <span>
+                                  {stockInfo.available} unit{stockInfo.available !== 1 ? 's' : ''} available
+                                  {stockInfo.reserved > 0 && (
+                                    <span className="ml-1 text-blue-600 font-semibold">· {stockInfo.reserved} reserved</span>
                                   )}
+                                  {stockInfo.label ? ` (${stockInfo.label})` : ''}
+                                  {!stockInfo.ok && ` — you've used ${stockInfo.usedInForm}, only ${stockInfo.total} in fleet`}
+                                </span>
+                                <div className="ml-auto flex items-center gap-1 shrink-0">
+                                  <div className="w-16 h-1.5 bg-white/70 rounded-full overflow-hidden relative">
+                                    <div
+                                      className={clsx('h-full rounded-full transition-all duration-500',
+                                        stockInfo.ok ? 'bg-gradient-to-r from-green-400 to-green-600' : 'bg-gradient-to-r from-red-400 to-red-600')}
+                                      style={{ width: `${Math.min(100, (stockInfo.total / Math.max(stockInfo.usedInForm, stockInfo.total, 1)) * 100)}%` }}
+                                    />
+                                    {stockInfo.ok && (
+                                      <div className="absolute inset-0 w-1/3" style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent)', animation: 'shimmerSlide 2s ease-in-out infinite' }}/>
+                                    )}
+                                  </div>
+                                  {!stockInfo.ok && <span className="font-bold text-red-700">EXCEEDS</span>}
                                 </div>
-                                {!stockInfo.ok && <span className="font-bold text-red-700">EXCEEDS</span>}
                               </div>
+                              {/* Reserved-unit note — shown when the selected unit itself is Reserved */}
+                              {stockInfo.selectedStatus === 'Reserved' && (
+                                <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 border-t border-blue-100 text-xs" style={{ animation: 'fadeSlideIn 0.25s ease' }}>
+                                  <Info size={11} className="shrink-0"/>
+                                  <span>This unit is currently <strong>Reserved</strong> — confirm availability before dispatching</span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1413,6 +1449,39 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
         @keyframes shimmerSlide {
           0%   { transform: translateX(-150%); }
           100% { transform: translateX(350%); }
+        }
+        @keyframes pulseGlowBlue {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.2); }
+          50%      { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0); }
+        }
+        @keyframes scaleIn {
+          0%   { opacity: 0; transform: scale(0.7); }
+          70%  { transform: scale(1.08); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* ── Equipment dropdown row — indent-on-hover ── */
+        .qf-scope .group\/eq:hover { padding-left: 1.25rem; }
+
+        /* ── Reserved badge pulse ── */
+        .qf-scope .badge-reserved {
+          animation: scaleIn 0.2s ease, pulseGlowBlue 3s ease-in-out 0.5s infinite;
+        }
+
+        /* ── Line item card focus-within ring ── */
+        .qf-scope .group\/item:focus-within {
+          border-color: #c7d2fe;
+        }
+
+        /* ── Line total value — pop on change ── */
+        .qf-scope .line-total-value {
+          transition: color 0.2s ease, transform 0.15s ease;
+        }
+
+        /* ── Add Item button ripple ── */
+        @keyframes ripple {
+          from { transform: scale(0); opacity: 0.4; }
+          to   { transform: scale(2.5); opacity: 0; }
         }
       `}</style>
     </div>

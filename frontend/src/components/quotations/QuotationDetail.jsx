@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getQuotation, updateQuotation } from "../../api/quotations";
 import { getRequirement } from "../../api/requirements";
+import { createDispatchesFromQuotation } from "../../api/dispatch";
 import StatusBadge from "../common/StatusBadge";
 import LoadingSpinner from "../common/LoadingSpinner";
 import {
@@ -14,13 +15,15 @@ import {
   ClipboardList,
   Package,
   X,
+  Truck,
+  Clock,
+  AlertCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { downloadQuotationPDF } from "../../lib/pdfGenerator";
 import toast from "react-hot-toast";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
-// import { ExternalLink } from "lucide-react";
 
 export default function QuotationDetail({
   quotationId,
@@ -38,6 +41,8 @@ export default function QuotationDetail({
   const [showReject, setShowReject] = useState(false);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
   const [showReqPreview, setShowReqPreview] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState(null);
+  const [showDispatchResult, setShowDispatchResult] = useState(false);
 
   const load = async () => {
     try {
@@ -67,16 +72,40 @@ export default function QuotationDetail({
   const handleAction = async (status, extra = {}) => {
     setActing(true);
     try {
-      const payload = {
-        status,
-        ...extra,
-      };
-      // Always set approved_by when approving or rejecting
+      const payload = { status, ...extra };
       if (["Approved", "Rejected"].includes(status)) {
         payload.approved_by = profile.user_id;
       }
       await updateQuotation(quotationId, payload);
-      toast.success(`Quotation ${status}`);
+
+      if (status === "Approved") {
+        // Refetch full quotation so quotation_items have equipment_id populated
+        const fullQ = await getQuotation(quotationId);
+        let result = { created: [], pendingProcurement: [], errors: [] };
+        try {
+          result = await createDispatchesFromQuotation(fullQ, profile.user_id);
+        } catch (dispErr) {
+          console.error("[QuotationDetail] dispatch creation failed:", dispErr);
+          result.errors.push({ item: null, error: dispErr.message ?? String(dispErr) });
+        }
+
+        setDispatchResult(result);
+        setShowDispatchResult(true);
+
+        const { created, pendingProcurement, errors } = result;
+        if (errors.length > 0 && created.length === 0 && pendingProcurement.length === 0) {
+          toast.error(`Approved — but dispatch creation failed (${errors.length} error${errors.length > 1 ? "s" : ""})`);
+        } else if (errors.length > 0) {
+          toast(`Approved — ${created.length + pendingProcurement.length} dispatch(es) created · ${errors.length} failed`, { icon: "⚠️" });
+        } else if (pendingProcurement.length > 0) {
+          toast.success(`Approved — ${created.length} dispatch(es) created · ${pendingProcurement.length} awaiting procurement`);
+        } else {
+          toast.success(`Approved — ${created.length} dispatch(es) created`);
+        }
+      } else {
+        toast.success(`Quotation ${status}`);
+      }
+
       load();
       onRefresh?.();
     } catch (err) {
@@ -170,35 +199,106 @@ export default function QuotationDetail({
 
       {/* Approve confirmation modal */}
       {showApproveConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-              <CheckCircle size={18} className="text-green-500"/> Confirm Quotation Approval
-            </h3>
-            <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-gray-500">Quotation</span><span className="font-mono font-medium">{q.quotation_id}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Customer</span><span className="font-medium">{q.customers?.company_name}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="font-bold text-gray-900">KWD {Number(q.total_amount_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</span></div>
-              <div className="flex justify-between"><span className="text-gray-500">Items</span><span className="font-medium">{q.quotation_items?.length ?? 0} line items</span></div>
-              {q.requirement_id && <div className="flex justify-between"><span className="text-gray-500">Requirement</span><span className="font-mono text-xs">{q.requirement_id}</span></div>}
-            </div>
-            <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-sm text-green-700">
-              <p className="font-medium mb-1">Approving will:</p>
-              <ul className="text-xs space-y-0.5 list-disc list-inside text-green-600">
-                <li>Mark this quotation as Approved</li>
-                <li>Reserve the specified equipment</li>
-                <li>Create pending dispatch entries</li>
-                <li>Update the linked requirement status to Approved</li>
-              </ul>
-            </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowApproveConfirm(false)} className="btn-secondary">Cancel</button>
-              <button onClick={() => { setShowApproveConfirm(false); handleAction('Approved'); }}
-                disabled={acting}
-                className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
-                {acting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>}
-                Confirm Approval
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          style={{ animation: 'qdFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+            style={{ animation: 'qdSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            {/* Modal header */}
+            <div className="bg-gradient-to-r from-green-500 to-emerald-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <CheckCircle size={20} />
+                <span className="font-semibold text-base">Confirm Approval</span>
+              </div>
+              <button onClick={() => setShowApproveConfirm(false)}
+                className="text-white/70 hover:text-white transition-colors">
+                <X size={18} />
               </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Quotation summary */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Quotation</span>
+                  <span className="font-mono font-semibold text-gray-800">{q.quotation_id}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Customer</span>
+                  <span className="font-medium text-gray-800">{q.customers?.company_name}</span>
+                </div>
+                <div className="flex justify-between border-t border-gray-200 pt-2 mt-1">
+                  <span className="text-gray-500 font-medium">Total</span>
+                  <span className="font-bold text-gray-900">
+                    KWD {Number(q.total_amount_kwd).toLocaleString('en-US', { minimumFractionDigits: 3 })}
+                  </span>
+                </div>
+                {q.requirement_id && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Requirement</span>
+                    <span className="font-mono text-xs text-gray-600">{q.requirement_id}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Dispatch preview */}
+              {(q.quotation_items?.length ?? 0) > 0 && (() => {
+                const fleetItems    = q.quotation_items.filter(i => i.equipment_id);
+                const pendingItems  = q.quotation_items.filter(i => !i.equipment_id);
+                return (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                      <Truck size={12} /> Dispatch Preview
+                    </p>
+                    {fleetItems.length > 0 && (
+                      <div className="bg-green-50 border border-green-100 rounded-xl p-3">
+                        <p className="text-xs font-medium text-green-700 mb-1.5 flex items-center gap-1">
+                          <CheckCircle size={11} /> {fleetItems.length} dispatch{fleetItems.length > 1 ? 'es' : ''} — equipment in fleet
+                        </p>
+                        <div className="space-y-1">
+                          {fleetItems.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-2 text-xs text-green-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                              <span className="truncate">{item.description}</span>
+                              <span className="font-mono text-green-400 shrink-0">{item.equipment_id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {pendingItems.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                        <p className="text-xs font-medium text-amber-700 mb-1.5 flex items-center gap-1">
+                          <Clock size={11} /> {pendingItems.length} item{pendingItems.length > 1 ? 's' : ''} — dispatch after equipment received
+                        </p>
+                        <div className="space-y-1">
+                          {pendingItems.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-2 text-xs text-amber-600">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                              <span className="truncate">{item.description}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Action buttons */}
+              <div className="flex justify-end gap-3 pt-1">
+                <button onClick={() => setShowApproveConfirm(false)} className="btn-secondary">Cancel</button>
+                <button
+                  onClick={() => { setShowApproveConfirm(false); handleAction('Approved'); }}
+                  disabled={acting}
+                  className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors shadow-sm"
+                >
+                  {acting
+                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <CheckCircle size={15} />
+                  }
+                  Confirm Approval
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -468,6 +568,107 @@ export default function QuotationDetail({
           onClose={() => setShowReqPreview(false)}
         />
       )}
+
+      {/* Dispatch result modal */}
+      {showDispatchResult && dispatchResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          style={{ animation: 'qdFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            style={{ animation: 'qdSlideUp 0.24s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            {/* Header */}
+            <div className="bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <Truck size={18} />
+                <span className="font-semibold">Dispatches Created</span>
+              </div>
+              <button onClick={() => setShowDispatchResult(false)} className="text-white/70 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3">
+              {/* Created dispatches */}
+              {dispatchResult.created.length > 0 && (
+                <div className="bg-green-50 border border-green-100 rounded-xl p-3"
+                  style={{ animation: 'qdPopIn 0.28s cubic-bezier(0.34,1.56,0.64,1) 0.08s both' }}>
+                  <p className="text-xs font-semibold text-green-700 mb-2 flex items-center gap-1.5">
+                    <CheckCircle size={12} />
+                    {dispatchResult.created.length} Dispatch{dispatchResult.created.length > 1 ? 'es' : ''} Created
+                  </p>
+                  <div className="space-y-1.5">
+                    {dispatchResult.created.map(({ dispatch, item }, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-xs"
+                        style={{ animation: `qdPopIn 0.22s cubic-bezier(0.34,1.56,0.64,1) ${0.1 + idx * 0.05}s both` }}>
+                        <Truck size={11} className="text-green-500 mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-green-800 font-medium truncate">{item.description}</p>
+                          <p className="text-green-500 font-mono">{dispatch.dispatch_id}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pending procurement — no dispatch record created (equipment_id NOT NULL) */}
+              {dispatchResult.pendingProcurement.length > 0 && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-3"
+                  style={{ animation: 'qdPopIn 0.28s cubic-bezier(0.34,1.56,0.64,1) 0.14s both' }}>
+                  <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
+                    <Clock size={12} />
+                    {dispatchResult.pendingProcurement.length} Awaiting Equipment (no dispatch yet)
+                  </p>
+                  <div className="space-y-1.5">
+                    {dispatchResult.pendingProcurement.map(({ item }, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-xs"
+                        style={{ animation: `qdPopIn 0.22s cubic-bezier(0.34,1.56,0.64,1) ${0.16 + idx * 0.05}s both` }}>
+                        <Clock size={11} className="text-amber-500 mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-amber-800 font-medium truncate">{item.description}</p>
+                          <p className="text-amber-400 text-xs">Dispatch will be created when equipment is received into fleet</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Errors */}
+              {dispatchResult.errors.length > 0 && (
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3"
+                  style={{ animation: 'qdShake 0.4s ease 0.2s both' }}>
+                  <p className="text-xs font-semibold text-red-700 mb-2 flex items-center gap-1.5">
+                    <AlertCircle size={12} />
+                    {dispatchResult.errors.length} Failed
+                  </p>
+                  <div className="space-y-1">
+                    {dispatchResult.errors.map(({ item, error }, idx) => (
+                      <div key={idx} className="text-xs text-red-600">
+                        {item?.description && <span className="font-medium">{item.description}: </span>}
+                        {error}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => setShowDispatchResult(false)}
+                className="w-full btn-primary py-2.5 mt-1"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes qdFadeIn   { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes qdSlideUp  { from { opacity: 0; transform: translateY(24px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes qdPopIn    { from { opacity: 0; transform: scale(0.92) } to { opacity: 1; transform: scale(1) } }
+        @keyframes qdShake    { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-4px)} 40%,80%{transform:translateX(4px)} }
+      `}</style>
     </div>
   );
 }

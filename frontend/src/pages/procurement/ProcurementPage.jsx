@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   getProcurements, createProcurement, updateProcurement,
   getVendors, createVendor,
@@ -15,7 +16,8 @@ import { downloadPurchaseOrderPDF } from '../../lib/pdfGenerator';
 import {
   Plus, ShoppingCart, X, Loader2, RefreshCw, FileText,
   Send, Download, Trash2, CheckCircle, Eye, Package, Search,
-  ChevronDown,
+  ChevronDown, Calendar, MapPin, Sparkles, RotateCcw, Hash,
+  AlertCircle, ArrowRight,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabaseClient';
@@ -25,6 +27,46 @@ import clsx from 'clsx';
 const TABS          = ['Requests','Purchase Orders','Vendors'];
 // const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
 const EMPTY_ITEM    = { description:'', capacity:'', unit_price_kwd:'', equipment_type_id:'' };
+
+// ── Serial-number suggestion helpers ─────────────────────────────────────────
+
+function getSerialPrefix(typeName) {
+  if (!typeName) return 'EQ';
+  const words = typeName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.map(w => w[0].toUpperCase()).slice(0, 4).join('');
+}
+
+function parseSerial(s) {
+  // Handles CC001, CC-001, FL123, EXCV-001 etc.
+  const m = s?.match(/^([A-Za-z]+[-_]?)(\d+)$/);
+  return m ? { prefix: m[1], num: parseInt(m[2], 10), padLen: m[2].length } : null;
+}
+
+function suggestNextSerials(typeName, dbSerials, count, sessionSerials = []) {
+  const all = [...dbSerials, ...sessionSerials].filter(Boolean);
+  const parsed = all.map(parseSerial).filter(Boolean);
+
+  if (parsed.length === 0) {
+    // No existing pattern — generate prefix with dash for new types
+    const pfx = getSerialPrefix(typeName) + '-';
+    return Array.from({ length: count }, (_, i) =>
+      `${pfx}${String(i + 1).padStart(3, '0')}`
+    );
+  }
+
+  // Find most-used prefix
+  const freq = {};
+  parsed.forEach(p => { freq[p.prefix] = (freq[p.prefix] || 0) + 1; });
+  const prefix   = Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
+  const relevant = parsed.filter(p => p.prefix === prefix);
+  const maxNum   = Math.max(...relevant.map(p => p.num));
+  const padLen   = Math.max(3, relevant[0].padLen);
+
+  return Array.from({ length: count }, (_, i) =>
+    `${prefix}${String(maxNum + 1 + i).padStart(padLen, '0')}`
+  );
+}
 
 // ── Vendor Modal — defined OUTSIDE parent to prevent remount on state change ──
 function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCreated, formLoading, setFormLoading }) {
@@ -53,7 +95,7 @@ function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCre
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">Add New Vendor</h3>
-          <button type="button" onClick={() => setShowModal(showModal === 'vendor-inline' ? 'proc' : null)}>
+          <button type="button" onClick={() => setShowModal(showModal === 'vendor-inline' ? 'proc' : showModal === 'vendor-po' ? 'po' : null)}>
             <X size={18} className="text-gray-400"/>
           </button>
         </div>
@@ -112,7 +154,7 @@ function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCre
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button"
-              onClick={() => setShowModal(showModal === 'vendor-inline' ? 'proc' : null)}
+              onClick={() => setShowModal(showModal === 'vendor-inline' ? 'proc' : showModal === 'vendor-po' ? 'po' : null)}
               className="btn-secondary">Cancel</button>
             <button type="submit" disabled={formLoading} className="btn-primary flex items-center gap-2">
               {formLoading && <Loader2 size={14} className="animate-spin"/>}
@@ -126,11 +168,20 @@ function VendorModal({ vendors, setVendors, showModal, setShowModal, onVendorCre
 }
 
 // ── New Equipment Type Modal — also outside to prevent remount ──
-function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading }) {
+function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading, initialName = '' }) {
   const [form, setForm] = useState({
-    name:'', category:'',
+    name: initialName, category:'',
     default_daily_rate_kwd:'', manufacturer:'', unit:'Unit',
   });
+
+  // Re-sync if initialName arrives after first render (e.g. async open)
+  const prevInitial = useRef(initialName);
+  useEffect(() => {
+    if (initialName && initialName !== prevInitial.current) {
+      setForm(f => ({ ...f, name: initialName }));
+      prevInitial.current = initialName;
+    }
+  }, [initialName]);
 
   const CATEGORIES = ['Crane','Material Handling','Lifting','Transport','Trailer','Tanker','Power','Other'];
 
@@ -200,39 +251,78 @@ function NewEquipmentTypeModal({ onCreated, onClose, formLoading, setFormLoading
 }
 
 // ── Searchable Equipment Type Selector ──────────────────────────────────────
+// Renders the dropdown via a React portal so it is never clipped by an
+// ancestor with overflow:hidden/auto (e.g. the receive-modal scroll container).
 function EqTypeSelector({ value, eqTypes, onChange, onAddNew }) {
-  const [search, setSearch]   = useState('');
-  const [open,   setOpen]     = useState(false);
-  const ref                   = useRef(null);
+  const [search, setSearch] = useState('');
+  const [open,   setOpen]   = useState(false);
+  const [pos,    setPos]    = useState({ top: 0, left: 0, width: 200 });
+  const triggerRef          = useRef(null);
+  const dropRef             = useRef(null);
 
   const filtered = eqTypes.filter(t =>
     !search ||
     t.name.toLowerCase().includes(search.toLowerCase()) ||
-    t.category?.toLowerCase().includes(search.toLowerCase())
+    (t.category ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
   const selectedType = eqTypes.find(t => t.type_id === value);
 
+  const calcPos = () => {
+    if (!triggerRef.current) return;
+    const rect  = triggerRef.current.getBoundingClientRect();
+    const dropH = 320;
+    const top   = rect.bottom + dropH > window.innerHeight ? rect.top - dropH : rect.bottom + 4;
+    setPos({ top, left: rect.left, width: rect.width });
+  };
+
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    // Close only when clicking outside BOTH the trigger and the portal dropdown
+    const closeClick = (e) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target) &&
+        dropRef.current   && !dropRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    document.addEventListener('mousedown', closeClick);
+    window.addEventListener('scroll', calcPos, true);
+    window.addEventListener('resize', calcPos);
+    return () => {
+      document.removeEventListener('mousedown', closeClick);
+      window.removeEventListener('scroll', calcPos, true);
+      window.removeEventListener('resize', calcPos);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleOpen = () => {
+    if (!open) calcPos();
+    setOpen(v => !v);
+    setSearch('');
+  };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={triggerRef} className="relative">
       <button type="button"
-        onClick={() => { setOpen(v => !v); setSearch(''); }}
+        onClick={handleOpen}
         className="input w-full text-left flex items-center justify-between text-sm"
       >
         <span className={selectedType ? 'text-gray-800' : 'text-gray-400'}>
-          {selectedType ? `${selectedType.name}${selectedType.category ? ` (${selectedType.category})` : ''}` : 'Search equipment type…'}
+          {selectedType
+            ? `${selectedType.name}${selectedType.category ? ` (${selectedType.category})` : ''}`
+            : 'Search equipment type…'}
         </span>
-        <ChevronDown size={14} className="text-gray-400 shrink-0 ml-2"/>
+        <ChevronDown size={14} className={clsx('text-gray-400 shrink-0 ml-2 transition-transform', open && 'rotate-180')}/>
       </button>
 
-      {open && (
-        <div className="absolute top-full left-0 right-0 z-40 bg-white border border-gray-200 rounded-xl shadow-xl mt-1 overflow-hidden">
+      {open && createPortal(
+        <div
+          ref={dropRef}
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+          style={{ top: pos.top, left: pos.left, width: pos.width }}
+        >
           <div className="p-2 border-b border-gray-100">
             <div className="relative">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"/>
@@ -251,6 +341,7 @@ function EqTypeSelector({ value, eqTypes, onChange, onAddNew }) {
               <p className="text-xs text-gray-400 text-center py-3">No types found</p>
             ) : filtered.map(t => (
               <button key={t.type_id} type="button"
+                onMouseDown={e => e.preventDefault()}
                 onClick={() => { onChange(t.type_id); setOpen(false); setSearch(''); }}
                 className={clsx(
                   'w-full text-left px-4 py-2.5 text-xs border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors',
@@ -264,13 +355,15 @@ function EqTypeSelector({ value, eqTypes, onChange, onAddNew }) {
           </div>
           <div className="p-2 border-t border-gray-100">
             <button type="button"
+              onMouseDown={e => e.preventDefault()}
               onClick={() => { setOpen(false); onAddNew(); }}
               className="w-full flex items-center gap-2 text-xs text-primary-600 hover:bg-primary-50 px-2 py-1.5 rounded-lg transition-colors"
             >
               <Plus size={12}/> Add new equipment type
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -582,7 +675,9 @@ export default function ProcurementPage() {
   const [selected,         setSelected]         = useState(null);
   const [previewPO,        setPreviewPO]        = useState(null);
   const [previewProc,      setPreviewProc]      = useState(null);
-  const [newCapacityForIdx, setNewCapacityForIdx] = useState(null); // item idx waiting for new capacity
+  const [newCapacityForIdx,   setNewCapacityForIdx]   = useState(null);
+  const [receiveNewTypeItemId,       setReceiveNewTypeItemId]       = useState(null);
+  const [receiveNewTypeSuggestedName, setReceiveNewTypeSuggestedName] = useState('');
 
   const canWrite   = hasPermission(role, 'procurement_create');
   const canApprove = hasPermission(role, 'procurement_approve');
@@ -643,7 +738,12 @@ export default function ProcurementPage() {
   const openProcEdit = (p) => {
     setProcForm({ title:p.title, description:p.description??'', type:p.type, vendor_id:p.vendor_id??'', priority:p.priority??'Normal', required_by_date:p.required_by_date??'', lease_start_date:p.lease_start_date??'', lease_end_date:p.lease_end_date??'', lease_monthly_kwd:p.lease_monthly_kwd??'', terms_conditions:p.terms_conditions??'', notes:p.notes??'', status:p.status });
     setProcItems(p.procurement_items?.length > 0
-      ? p.procurement_items.map(i => ({ description:i.description, capacity:i.description, quantity:i.quantity, unit:i.unit, unit_price_kwd:i.unit_price_kwd, equipment_type_id:i.equipment_type_id??'' }))
+      ? p.procurement_items.map(i => {
+          const desc = i.description ?? '';
+          const sep  = desc.indexOf(' — ');
+          const capacity = sep !== -1 ? desc.slice(sep + 3) : 'N/A';
+          return { description: desc, capacity, quantity: i.quantity, unit: i.unit, unit_price_kwd: i.unit_price_kwd, equipment_type_id: i.equipment_type_id ?? '' };
+        })
       : [{ ...EMPTY_ITEM }]);
     setSelected(p);
     setShowModal('proc');
@@ -725,60 +825,245 @@ export default function ProcurementPage() {
     } catch { toast.error('Failed to submit'); }
   };
 
+  // ── Receive helpers ───────────────────────────────────────────────────────
+  const updateReceiveItem = (itemId, field, val) =>
+    setReceiveItems(prev => prev.map(it => it.item_id === itemId ? { ...it, [field]: val } : it));
+
+  const updateReceiveUnit = (itemId, unitIdx, field, val) =>
+    setReceiveItems(prev => prev.map(it => {
+      if (it.item_id !== itemId) return it;
+      const units = it.units.map((u, i) => i === unitIdx ? { ...u, [field]: val } : u);
+      return { ...it, units };
+    }));
+
+  const updateReceiveItemType = async (itemId, typeId, typeName, qty) => {
+    const category = eqTypes.find(t => t.type_id === typeId)?.category ?? '';
+    setReceiveItems(prev => prev.map(it => it.item_id !== itemId ? it : {
+      ...it,
+      equipment_type_id:       typeId,
+      equipment_type_name:     typeName,
+      equipment_type_category: category,
+      typeAutoMatched:         false,
+      showTypeOverride:        false,
+      loadingSuggestions:      true,
+    }));
+    try {
+      const { data: existing } = await supabase
+        .from('equipment_units')
+        .select('serial_number')
+        .eq('type_id', typeId)
+        .not('serial_number', 'is', null);
+      const dbSerials = (existing ?? []).map(u => u.serial_number);
+
+      // Read LATEST state inside the updater to avoid stale-closure duplicates
+      // when two items of the same type update in quick succession.
+      setReceiveItems(prev => {
+        const sessionSerials = prev
+          .filter(it => it.item_id !== itemId && it.equipment_type_id === typeId)
+          .flatMap(it => it.units.map(u => (u.serial || u.suggestion || '').trim()).filter(Boolean));
+
+        const suggestions = suggestNextSerials(typeName, dbSerials, qty ?? 1, sessionSerials);
+        return prev.map(it => it.item_id !== itemId ? it : {
+          ...it,
+          loadingSuggestions: false,
+          units: it.units.map((u, i) => ({ ...u, suggestion: suggestions[i] ?? '', serial: suggestions[i] ?? '' })),
+        });
+      });
+    } catch {
+      setReceiveItems(prev => prev.map(it => it.item_id !== itemId ? it : { ...it, loadingSuggestions: false }));
+    }
+  };
+
   // ── Receive ───────────────────────────────────────────────────────────────
-  const openReceive = (proc) => {
+  const openReceive = async (proc) => {
+    const today = new Date().toISOString().split('T')[0];
     setSelected(proc);
-    setReceiveItems((proc.procurement_items ?? []).map(item => ({
-      item_id:           item.item_id,
-      description:       item.description,
-      equipment_type_id: item.equipment_type_id,
-      quantity:          item.quantity,
-      received_qty:      item.quantity,
-      received_date:     new Date().toISOString().split('T')[0],
-      fleet_location:    'Yard',
-      daily_rate_kwd:    0,
-      procurement_type:  proc.type ?? 'Purchase',
-      lease_start:       proc.lease_start_date ?? '',
-      lease_end:         proc.lease_end_date   ?? '',
-      // One serial number entry per unit — filled in by user
-      serial_numbers:    Array.from({ length: item.quantity }, () => ''),
-    })));
+
+    // Case-insensitive name match against the loaded equipment types list.
+    // Auto-generated procurement items from quotations have no equipment_type_id —
+    // this catches them so serial suggestions fire without the user having to select.
+    const autoMatchType = (desc) => {
+      if (!desc || !eqTypes.length) return null;
+      const typePart = (desc.includes(' — ') ? desc.split(' — ')[0] : desc).toLowerCase().trim();
+      return eqTypes.find(t => t.name.toLowerCase().trim() === typePart) ?? null;
+    };
+
+    const initial = (proc.procurement_items ?? []).map(item => {
+      const desc = item.description ?? '';
+      const sep  = desc.indexOf(' — ');
+      const capacity = sep !== -1 ? desc.slice(sep + 3).trim() : '';
+
+      let typeId          = item.equipment_type_id ?? null;
+      let typeName        = item.equipment_types?.name ?? '';
+      let typeCategory    = item.equipment_types?.category ?? '';
+      let typeAutoMatched = false;
+
+      if (!typeId) {
+        const matched = autoMatchType(desc);
+        if (matched) {
+          typeId          = matched.type_id;
+          typeName        = matched.name;
+          typeCategory    = matched.category ?? '';
+          typeAutoMatched = true;
+        } else {
+          // No match — extract display name from description prefix
+          typeName = sep !== -1 ? desc.slice(0, sep).trim() : desc;
+        }
+      } else {
+        typeCategory = eqTypes.find(t => t.type_id === typeId)?.category ?? '';
+      }
+
+      return {
+        item_id:             item.item_id,
+        description:         desc,
+        capacity,
+        equipment_type_id:   typeId,
+        equipment_type_name: typeName,
+        equipment_type_category: typeCategory,
+        typeAutoMatched,
+        showTypeOverride:    false,   // toggle inline type-change selector
+        quantity:            item.quantity ?? 1,
+        received_date:       today,
+        location:            'Yard',
+        daily_rate_kwd:      item.unit_price_kwd ? String(item.unit_price_kwd) : '',
+        procurement_type:    proc.type ?? 'Purchase',
+        lease_start:         proc.lease_start_date ?? '',
+        lease_end:           proc.lease_end_date   ?? '',
+        units:               Array.from({ length: item.quantity ?? 1 }, () => ({ serial: '', suggestion: '', error: '' })),
+        loadingSuggestions:  !!typeId,
+      };
+    });
+
+    setReceiveItems(initial);
     setShowModal('receive');
+
+    // Fetch existing serials for all type_ids (including auto-matched) in a
+    // single round-trip. Process items in order so that multiple items of the
+    // same type in ONE procurement don't collide (CC003 → CC004, not CC003 × 2).
+    const typeIds = [...new Set(initial.filter(i => i.equipment_type_id).map(i => i.equipment_type_id))];
+    if (!typeIds.length) return;
+
+    try {
+      const { data: existing } = await supabase
+        .from('equipment_units')
+        .select('serial_number, type_id')
+        .in('type_id', typeIds)
+        .not('serial_number', 'is', null);
+
+      const dbByType = {};
+      for (const u of existing ?? []) {
+        if (!dbByType[u.type_id]) dbByType[u.type_id] = [];
+        dbByType[u.type_id].push(u.serial_number);
+      }
+
+      // sessionByType accumulates serials "used" earlier in THIS procurement
+      // so two CC items in the same request get CC003 and CC004, not CC003 twice.
+      const sessionByType = {};
+      const withSuggestions = initial.map(item => {
+        if (!item.equipment_type_id) return { ...item, loadingSuggestions: false };
+
+        const dbSerials   = dbByType[item.equipment_type_id] ?? [];
+        const session     = sessionByType[item.equipment_type_id] ?? [];
+        const suggestions = suggestNextSerials(item.equipment_type_name, dbSerials, item.quantity, session);
+
+        sessionByType[item.equipment_type_id] = [...session, ...suggestions];
+
+        return {
+          ...item,
+          loadingSuggestions: false,
+          units: item.units.map((u, i) => ({
+            ...u,
+            suggestion: suggestions[i] ?? '',
+            serial:     suggestions[i] ?? '',
+          })),
+        };
+      });
+
+      // Safety dedup pass: if any two units across all items got the same
+      // suggestion (e.g. sessionByType mismatch on type_id casing), bump the
+      // duplicate forward to the next available serial.
+      const globalUsed = new Set();
+      const deduped = withSuggestions.map(item => {
+        if (!item.equipment_type_id) return item;
+        const units = item.units.map(u => {
+          const s0 = u.serial;
+          if (!s0) return u;
+          let s = s0;
+          let p = parseSerial(s);
+          while (globalUsed.has(s.toUpperCase())) {
+            if (p) {
+              p = { ...p, num: p.num + 1 };
+              s = `${p.prefix}${String(p.num).padStart(p.padLen, '0')}`;
+            } else {
+              break;
+            }
+          }
+          globalUsed.add(s.toUpperCase());
+          return s !== s0 ? { ...u, serial: s, suggestion: s } : u;
+        });
+        return { ...item, units };
+      });
+
+      setReceiveItems(deduped);
+    } catch {
+      setReceiveItems(prev => prev.map(it => ({ ...it, loadingSuggestions: false })));
+    }
   };
 
   const handleReceive = async (e) => {
     e.preventDefault();
 
-    // Validate daily rate — required for all items with equipment types
-    for (const item of receiveItems) {
-      if (!item.equipment_type_id) continue;
-      if (!item.daily_rate_kwd || Number(item.daily_rate_kwd) <= 0) {
-        return toast.error(`Enter a daily rate for: ${item.description}`);
-      }
+    // Warn about items that have no equipment type — they'll be marked received
+    // but won't be added to the fleet.
+    const unlinked = receiveItems.filter(it => !it.equipment_type_id);
+    if (unlinked.length > 0 && receiveItems.length > 0) {
+      const names = unlinked.map(it => `"${it.description}"`).join(', ');
+      // eslint-disable-next-line no-alert
+      const ok = window.confirm(
+        `${unlinked.length} item(s) have no equipment type linked and will NOT be added to the fleet:\n${names}\n\nSelect an equipment type for each item to enable fleet tracking.\n\nProceed without fleet tracking for these items?`
+      );
+      if (!ok) return;
     }
 
-    // Validate serial numbers — must be unique and non-empty for items with equipment types
     const allSerials = [];
     for (const item of receiveItems) {
       if (!item.equipment_type_id) continue;
-      const count = item.received_qty;
-      for (let i = 0; i < count; i++) {
-        const serial = item.serial_numbers?.[i]?.trim() ?? '';
-        if (!serial) return toast.error(`Enter serial number for all units of: ${item.description}`);
-        if (allSerials.includes(serial)) return toast.error(`Duplicate serial number "${serial}" — each unit must have a unique serial`);
+      if (!item.daily_rate_kwd || Number(item.daily_rate_kwd) <= 0) {
+        return toast.error(`Enter a daily rate for: ${item.equipment_type_name || item.description}`);
+      }
+      for (let i = 0; i < item.quantity; i++) {
+        const serial = item.units[i]?.serial?.trim() ?? '';
+        if (!serial) return toast.error(`Enter serial number for unit ${i + 1} of: ${item.equipment_type_name || item.description}`);
+        if (allSerials.includes(serial)) return toast.error(`Duplicate serial "${serial}" — every unit needs a unique serial number`);
         allSerials.push(serial);
       }
     }
 
     setFormLoading(true);
     try {
-      await receiveProcurement(selected.procurement_id, receiveItems, profile.user_id);
+      // Map new structure → format expected by receiveProcurement API
+      const apiItems = receiveItems.map(item => ({
+        item_id:           item.item_id,
+        description:       item.description,
+        equipment_type_id: item.equipment_type_id,
+        quantity:          item.quantity,
+        received_qty:      item.quantity,
+        received_date:     item.received_date,
+        fleet_location:    item.location,
+        daily_rate_kwd:    item.daily_rate_kwd,
+        procurement_type:  item.procurement_type,
+        lease_start:       item.lease_start,
+        lease_end:         item.lease_end,
+        capacity:          item.capacity?.trim() || null,
+        serial_numbers:    item.units.map(u => u.serial?.trim() ?? ''),
+      }));
+      await receiveProcurement(selected.procurement_id, apiItems, profile.user_id);
       toast.success('Procurement received — items added to equipment fleet');
       setShowModal(null);
       loadAll();
     } catch (err) {
       if (err.message?.includes('serial_number') || err.code === '23505') {
-        toast.error('One or more serial numbers already exist in the fleet. Please check and use unique serial numbers.');
+        toast.error('One or more serial numbers already exist in the fleet. Please use unique serial numbers.');
       } else {
         toast.error(err.message || 'Failed to receive');
       }
@@ -843,6 +1128,9 @@ export default function ProcurementPage() {
     if (showModal === 'vendor-inline') {
       setProcForm(f => ({ ...f, vendor_id: newVendor.vendor_id }));
       setShowModal('proc');
+    } else if (showModal === 'vendor-po') {
+      setPoForm(f => ({ ...f, vendor_id: newVendor.vendor_id }));
+      setShowModal('po');
     } else {
       setShowModal(null);
     }
@@ -852,9 +1140,20 @@ export default function ProcurementPage() {
   const handleEqTypeCreated = async (newType) => {
     const updated = await getEquipmentTypes();
     setEqTypes(updated);
-    // If we have an active item being edited, we can't easily set it here
-    // The user will need to select from the dropdown which now includes the new type
     setShowModal('proc');
+  };
+
+  // ── Equipment type created while in receive modal ──────────────────────────
+  const handleEqTypeCreatedForReceive = async (newType) => {
+    const updated = await getEquipmentTypes();
+    setEqTypes(updated);
+    if (receiveNewTypeItemId) {
+      const item = receiveItems.find(it => it.item_id === receiveNewTypeItemId);
+      updateReceiveItemType(receiveNewTypeItemId, newType.type_id, newType.name, item?.quantity ?? 1);
+      setReceiveNewTypeItemId(null);
+      setReceiveNewTypeSuggestedName('');
+    }
+    setShowModal('receive');
   };
 
   // ── Proc items helpers ────────────────────────────────────────────────────
@@ -1341,132 +1640,397 @@ export default function ProcurementPage() {
 
       {/* ── Receive Modal ── */}
       {showModal === 'receive' && selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <div>
-                <h3 className="font-semibold text-gray-900">Receive Procurement</h3>
-                <p className="text-sm text-gray-400">{selected.procurement_id} — {selected.title}</p>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          style={{ animation: 'rcvFadeIn 0.2s ease' }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col"
+            style={{ animation: 'rcvSlideUp 0.28s cubic-bezier(0.16,1,0.3,1)' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
+                  <Package size={17} className="text-emerald-600"/>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Receive Procurement</h3>
+                  <p className="text-xs text-gray-400 truncate max-w-xs">{selected.procurement_id} — {selected.title}</p>
+                </div>
               </div>
-              <button onClick={() => setShowModal(null)}><X size={18} className="text-gray-400"/></button>
+              <button onClick={() => setShowModal(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-lg hover:bg-gray-50">
+                <X size={18}/>
+              </button>
             </div>
-            <form onSubmit={handleReceive} className="p-5 space-y-4">
-              <div className="bg-blue-50 rounded-xl p-3 text-sm text-blue-700">
-                <p className="font-medium mb-1">Confirming receipt will:</p>
-                <ul className="text-xs space-y-0.5 list-disc list-inside text-blue-600">
-                  <li>Update procurement status to Received</li>
-                  <li>Add equipment units to the fleet for items with linked equipment types</li>
-                  <li>Mark linked PO as Delivered</li>
-                </ul>
-              </div>
 
-              <div className="space-y-4">
-                {receiveItems.map((item, idx) => (
-                  <div key={item.item_id} className="border border-gray-100 rounded-xl p-4 bg-gray-50/30 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-gray-800">{item.description}</p>
-                      <span className={clsx('badge border text-xs',
-                        item.procurement_type === 'Lease' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100')}>
-                        {item.procurement_type}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Received Qty (of {item.quantity})</label>
-                        <input type="number" min="0" max={item.quantity} className="input text-sm"
-                          value={item.received_qty}
-                          onChange={e => {
-                            const qty = Math.max(0, Math.min(Number(e.target.value), item.quantity));
-                            setReceiveItems(items => items.map((it, i) => {
-                              if (i !== idx) return it;
-                              // Resize serial_numbers array to match new qty
-                              const serials = Array.from({ length: qty }, (_, si) => it.serial_numbers?.[si] ?? '');
-                              return { ...it, received_qty: qty, serial_numbers: serials };
-                            }));
-                          }}/>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Received Date</label>
-                        <input type="date" className="input text-sm" value={item.received_date}
-                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, received_date: e.target.value} : it))}/>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Fleet Location</label>
-                        <input className="input text-sm" placeholder="e.g. Ahmadi Depot" value={item.fleet_location}
-                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, fleet_location: e.target.value} : it))}/>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Daily Rate (KWD/day) *</label>
-                        <input type="number" min="0" step="0.001" className="input text-sm" placeholder="0.000"
-                          value={item.daily_rate_kwd}
-                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, daily_rate_kwd: e.target.value} : it))}/>
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Type</label>
-                        <select className="input text-sm" value={item.procurement_type}
-                          onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, procurement_type: e.target.value} : it))}>
-                          <option value="Purchase">Purchase</option>
-                          <option value="Lease">Lease</option>
-                        </select>
-                      </div>
-                      {item.procurement_type === 'Lease' && (
-                        <>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Lease Start</label>
-                            <input type="date" className="input text-sm" value={item.lease_start}
-                              onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, lease_start: e.target.value} : it))}/>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Lease End</label>
-                            <input type="date" className="input text-sm" value={item.lease_end}
-                              onChange={e => setReceiveItems(items => items.map((it,i) => i===idx ? {...it, lease_end: e.target.value} : it))}/>
-                          </div>
-                        </>
-                      )}
-                    </div>
+            <form onSubmit={handleReceive} className="flex-1 overflow-y-auto">
+              <div className="px-6 py-4 space-y-4">
 
-                    {/* Serial numbers — one per unit */}
-                    {item.equipment_type_id && item.received_qty > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-gray-600 flex items-center gap-1.5">
-                          Serial Numbers <span className="text-red-500">*</span>
-                          <span className="text-gray-400 font-normal">(one per unit — must be unique)</span>
-                        </p>
-                        <div className="space-y-1.5">
-                          {Array.from({ length: item.received_qty }).map((_, unitIdx) => (
-                            <div key={unitIdx} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-400 w-14 shrink-0">Unit {unitIdx + 1}</span>
-                              <input
-                                className="input text-sm flex-1"
-                                placeholder={`Serial number for unit ${unitIdx + 1}`}
-                                value={item.serial_numbers?.[unitIdx] ?? ''}
-                                onChange={e => setReceiveItems(items => items.map((it, i) => {
-                                  if (i !== idx) return it;
-                                  const serials = [...(it.serial_numbers ?? [])];
-                                  serials[unitIdx] = e.target.value;
-                                  return { ...it, serial_numbers: serials };
-                                }))}
-                              />
+                {/* Info banner */}
+                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 space-y-1.5">
+                  <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                    <CheckCircle size={14}/> Confirming receipt will:
+                  </p>
+                  <div className="space-y-1">
+                    {[
+                      'Add each unit to the equipment fleet with its serial number',
+                      'Update procurement status to Received',
+                      'Mark the linked Purchase Order as Delivered',
+                    ].map((txt, i) => (
+                      <p key={i} className="text-xs text-emerald-700 flex items-center gap-2 pl-1">
+                        <ArrowRight size={10} className="shrink-0 text-emerald-400"/>
+                        {txt}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Item cards */}
+                {receiveItems.map((item, itemIdx) => {
+                  // Pre-compute duplicate serial set for this render
+                  const allSerialsFlat = receiveItems.flatMap(it =>
+                    it.equipment_type_id ? it.units.map(u => u.serial?.trim()).filter(Boolean) : []
+                  );
+                  const dupSet = new Set(
+                    allSerialsFlat.filter((s, i, arr) => arr.indexOf(s) !== i)
+                  );
+
+                  return (
+                    <div
+                      key={item.item_id}
+                      className="border border-gray-200 rounded-xl overflow-visible transition-all duration-200 hover:border-gray-300 hover:shadow-sm"
+                      style={{ animation: `rcvFadeSlide 0.3s ease ${itemIdx * 70}ms both` }}
+                    >
+                      {/* Item header row */}
+                      <div className={clsx(
+                        'px-4 py-3 flex items-start gap-3 border-b rounded-t-xl',
+                        item.equipment_type_id
+                          ? 'bg-gray-50 border-gray-100'
+                          : 'bg-amber-50/60 border-amber-100'
+                      )}>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-gray-800 truncate">{item.description}</p>
+                            {item.typeAutoMatched && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-emerald-100 text-emerald-700 border border-emerald-200 shrink-0"
+                                style={{ animation: 'rcvPopIn 0.25s ease' }}>
+                                <Sparkles size={9}/> Type matched
+                              </span>
+                            )}
+                            {!item.equipment_type_id && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-medium bg-amber-100 text-amber-700 border border-amber-200 shrink-0">
+                                <AlertCircle size={9}/> No type linked
+                              </span>
+                            )}
+                          </div>
+                          {item.equipment_type_id && (
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <p className="text-xs text-gray-500 font-medium">{item.equipment_type_name}</p>
+                              {item.equipment_type_category && (
+                                <span className="text-xs text-gray-400 px-1.5 py-0.5 rounded bg-gray-100">
+                                  {item.equipment_type_category}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => updateReceiveItem(item.item_id, 'showTypeOverride', !item.showTypeOverride)}
+                                className={clsx(
+                                  'inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border transition-colors',
+                                  item.showTypeOverride
+                                    ? 'bg-primary-100 text-primary-700 border-primary-200'
+                                    : 'text-primary-600 border-primary-200 hover:bg-primary-50'
+                                )}
+                              >
+                                <RotateCcw size={9}/> {item.showTypeOverride ? 'Cancel change' : 'Change type'}
+                              </button>
                             </div>
-                          ))}
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={clsx('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border',
+                            item.procurement_type === 'Lease' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100')}>
+                            {item.procurement_type}
+                          </span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                            {item.quantity} {item.quantity === 1 ? 'unit' : 'units'}
+                          </span>
                         </div>
                       </div>
-                    )}
 
-                    {!item.equipment_type_id && (
-                      <p className="text-xs text-yellow-600 bg-yellow-50 px-3 py-2 rounded-lg">
-                        ⚠ No equipment type linked — item will be marked received but won't auto-add to fleet.
-                      </p>
-                    )}
-                  </div>
-                ))}
+                      <div className="p-4 space-y-4">
+                        {/* Shared fields */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                              <MapPin size={10}/> Location
+                            </label>
+                            <input className="input text-sm" placeholder="e.g. Ahmadi Depot"
+                              value={item.location}
+                              onChange={e => updateReceiveItem(item.item_id, 'location', e.target.value)}/>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+                              <Calendar size={10}/> Received Date
+                            </label>
+                            <input type="date" className="input text-sm"
+                              value={item.received_date}
+                              onChange={e => updateReceiveItem(item.item_id, 'received_date', e.target.value)}/>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Source Type</label>
+                            <select className="input text-sm" value={item.procurement_type}
+                              onChange={e => updateReceiveItem(item.item_id, 'procurement_type', e.target.value)}>
+                              <option value="Purchase">Purchase</option>
+                              <option value="Lease">Lease</option>
+                            </select>
+                          </div>
+
+                          {item.equipment_type_id && (
+                            <>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">
+                                  Daily Rate (KWD) <span className="text-red-400">*</span>
+                                </label>
+                                <input type="number" min="0" step="0.001" className="input text-sm" placeholder="0.000"
+                                  value={item.daily_rate_kwd}
+                                  onChange={e => updateReceiveItem(item.item_id, 'daily_rate_kwd', e.target.value)}/>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">Capacity</label>
+                                <input className="input text-sm" placeholder="e.g. 25 Ton, 20ft"
+                                  value={item.capacity}
+                                  onChange={e => updateReceiveItem(item.item_id, 'capacity', e.target.value)}/>
+                              </div>
+                            </>
+                          )}
+
+                          {item.procurement_type === 'Lease' && (
+                            <>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">Lease Start</label>
+                                <input type="date" className="input text-sm" value={item.lease_start}
+                                  onChange={e => updateReceiveItem(item.item_id, 'lease_start', e.target.value)}/>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500 mb-1">Lease / Return End</label>
+                                <input type="date" className="input text-sm" value={item.lease_end}
+                                  onChange={e => updateReceiveItem(item.item_id, 'lease_end', e.target.value)}/>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Serial numbers — one per physical unit */}
+                        {item.equipment_type_id ? (
+                          <div className="space-y-2">
+                            {/* Header row */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-semibold text-gray-700 flex items-center gap-1.5">
+                                <Hash size={11}/> Serial Numbers
+                                <span className="text-red-400">*</span>
+                              </p>
+                              {item.loadingSuggestions && (
+                                <span className="text-xs text-primary-500 flex items-center gap-1" style={{ animation: 'rcvFadeSlide 0.2s ease' }}>
+                                  <Loader2 size={10} className="animate-spin"/> Generating suggestions…
+                                </span>
+                              )}
+                              {!item.loadingSuggestions && item.units[0]?.suggestion && (
+                                <span className="text-xs text-emerald-600 flex items-center gap-1" style={{ animation: 'rcvPopIn 0.25s ease' }}>
+                                  <Sparkles size={10}/> Auto-suggested from fleet history
+                                </span>
+                              )}
+                              {!item.loadingSuggestions && !item.units[0]?.suggestion && (
+                                <span className="text-xs text-gray-400 flex items-center gap-1">
+                                  No existing units — first in fleet
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Per-unit serial inputs */}
+                            <div className="space-y-2">
+                              {item.units.map((unit, unitIdx) => {
+                                const serial      = unit.serial?.trim() ?? '';
+                                const isDup       = serial && dupSet.has(serial);
+                                const matchesSug  = serial && unit.suggestion && serial === unit.suggestion;
+                                const hasSug      = !!unit.suggestion;
+                                const diffFromSug = hasSug && serial && serial !== unit.suggestion;
+                                const isEmpty     = !serial;
+
+                                return (
+                                  <div
+                                    key={unitIdx}
+                                    className={clsx(
+                                      'rounded-xl border p-3 transition-all duration-200',
+                                      isDup      ? 'border-red-200 bg-red-50/60 shadow-sm'
+                                      : matchesSug ? 'border-emerald-200 bg-emerald-50/30'
+                                      : isEmpty   ? 'border-gray-200 bg-white'
+                                      : 'border-amber-200 bg-amber-50/30'
+                                    )}
+                                    style={{ animation: `rcvFadeSlide 0.22s ease ${unitIdx * 45}ms both` }}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      {/* Unit badge */}
+                                      <span className={clsx(
+                                        'text-xs font-bold shrink-0 px-2 py-1 rounded-lg min-w-[52px] text-center',
+                                        isDup ? 'bg-red-100 text-red-600'
+                                          : matchesSug ? 'bg-emerald-100 text-emerald-700'
+                                          : 'bg-primary-50 text-primary-700'
+                                      )}>
+                                        Unit {unitIdx + 1}
+                                      </span>
+
+                                      {/* Serial input */}
+                                      <input
+                                        className={clsx(
+                                          'input text-sm font-mono flex-1 transition-all',
+                                          isDup      ? 'border-red-300 bg-red-50 focus:border-red-400'
+                                          : matchesSug ? 'border-emerald-300 focus:border-emerald-400'
+                                          : diffFromSug ? 'border-amber-300 focus:border-amber-400'
+                                          : ''
+                                        )}
+                                        placeholder={item.loadingSuggestions ? 'Generating suggestion…' : (hasSug ? unit.suggestion : `e.g. ${getSerialPrefix(item.equipment_type_name)}001`)}
+                                        value={unit.serial}
+                                        onChange={e => updateReceiveUnit(item.item_id, unitIdx, 'serial', e.target.value)}
+                                        spellCheck={false}
+                                        autoComplete="off"
+                                        disabled={item.loadingSuggestions}
+                                      />
+
+                                      {/* Status icon */}
+                                      {matchesSug && !isDup && (
+                                        <CheckCircle size={15} className="text-emerald-500 shrink-0" style={{ animation: 'rcvPopIn 0.2s ease' }}/>
+                                      )}
+                                      {isDup && (
+                                        <AlertCircle size={15} className="text-red-500 shrink-0" style={{ animation: 'rcvShake 0.3s ease' }}/>
+                                      )}
+
+                                      {/* Restore-to-suggestion */}
+                                      {diffFromSug && !isDup && (
+                                        <button
+                                          type="button"
+                                          title={`Restore to ${unit.suggestion}`}
+                                          onClick={() => updateReceiveUnit(item.item_id, unitIdx, 'serial', unit.suggestion)}
+                                          className="shrink-0 flex items-center gap-1 text-xs text-primary-500 hover:text-primary-700 px-2 py-1 rounded-lg border border-primary-200 hover:bg-primary-50 transition-all active:scale-95"
+                                        >
+                                          <RotateCcw size={10}/>
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {/* Contextual hint row */}
+                                    <div className="mt-1.5 pl-[68px] min-h-[16px]">
+                                      {isDup && (
+                                        <p className="text-xs text-red-600 flex items-center gap-1" style={{ animation: 'rcvShake 0.3s ease' }}>
+                                          <AlertCircle size={9}/> Duplicate — each unit needs a unique serial
+                                        </p>
+                                      )}
+                                      {!isDup && matchesSug && (
+                                        <p className="text-xs text-emerald-600 flex items-center gap-1">
+                                          <CheckCircle size={9}/> Matches suggested serial
+                                        </p>
+                                      )}
+                                      {!isDup && diffFromSug && (
+                                        <p className="text-xs text-amber-600 flex items-center gap-1.5">
+                                          <Sparkles size={9}/> Suggested:
+                                          <button type="button"
+                                            onClick={() => updateReceiveUnit(item.item_id, unitIdx, 'serial', unit.suggestion)}
+                                            className="font-mono font-semibold underline underline-offset-2 hover:text-amber-800 transition-colors">
+                                            {unit.suggestion}
+                                          </button>
+                                        </p>
+                                      )}
+                                      {!isDup && isEmpty && hasSug && (
+                                        <p className="text-xs text-primary-600 flex items-center gap-1.5">
+                                          <Sparkles size={9}/> Tap to use:
+                                          <button type="button"
+                                            onClick={() => updateReceiveUnit(item.item_id, unitIdx, 'serial', unit.suggestion)}
+                                            className="font-mono font-bold hover:underline transition-colors">
+                                            {unit.suggestion}
+                                          </button>
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Inline type-change panel */}
+                            {item.showTypeOverride && (
+                              <div className="mt-2 p-3 border border-primary-200 rounded-xl bg-primary-50/30 space-y-2"
+                                style={{ animation: 'rcvFadeSlide 0.18s ease' }}>
+                                <p className="text-xs font-semibold text-primary-700 flex items-center gap-1.5">
+                                  <ArrowRight size={10}/> Select a different equipment type
+                                </p>
+                                <EqTypeSelector
+                                  value={item.equipment_type_id}
+                                  eqTypes={eqTypes}
+                                  onChange={typeId => {
+                                    const t = eqTypes.find(t => t.type_id === typeId);
+                                    updateReceiveItemType(item.item_id, typeId, t?.name ?? '', item.quantity);
+                                  }}
+                                  onAddNew={() => {
+                                    setReceiveNewTypeItemId(item.item_id);
+                                    const desc = item.description ?? '';
+                                    setReceiveNewTypeSuggestedName(desc.includes(' — ') ? desc.split(' — ')[0].trim() : desc);
+                                    setShowModal('new-eq-type-receive');
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          /* No type — show selector to link or create one */
+                          <div className="space-y-3" style={{ animation: 'rcvFadeSlide 0.2s ease' }}>
+                            <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                              <AlertCircle size={14} className="text-amber-500 shrink-0 mt-0.5"/>
+                              <div>
+                                <p className="text-xs font-semibold text-amber-800">Equipment type not recognised</p>
+                                <p className="text-xs text-amber-600 mt-0.5">
+                                  Select an existing type or create a new one (with category) to add this item to the fleet and generate serial numbers.
+                                </p>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                                <Package size={11}/> Equipment Type
+                                <span className="font-normal text-gray-400">(required for fleet tracking)</span>
+                              </label>
+                              <EqTypeSelector
+                                value={item.equipment_type_id ?? ''}
+                                eqTypes={eqTypes}
+                                onChange={typeId => {
+                                  const t = eqTypes.find(t => t.type_id === typeId);
+                                  updateReceiveItemType(item.item_id, typeId, t?.name ?? '', item.quantity);
+                                }}
+                                onAddNew={() => {
+                                  setReceiveNewTypeItemId(item.item_id);
+                                  const desc = item.description ?? '';
+                                  setReceiveNewTypeSuggestedName(desc.includes(' — ') ? desc.split(' — ')[0].trim() : desc);
+                                  setShowModal('new-eq-type-receive');
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 shrink-0 bg-white sticky bottom-0 rounded-b-2xl">
                 <button type="button" onClick={() => setShowModal(null)} className="btn-secondary">Cancel</button>
-                <button type="submit" disabled={formLoading} className="btn-primary flex items-center gap-2">
-                  {formLoading && <Loader2 size={14} className="animate-spin"/>}
-                  {formLoading ? 'Processing…' : 'Confirm Receipt & Add to Fleet'}
+                <button type="submit" disabled={formLoading}
+                  className={clsx('btn-primary flex items-center gap-2 transition-all', formLoading && 'opacity-70 cursor-not-allowed')}>
+                  {formLoading
+                    ? <><Loader2 size={14} className="animate-spin"/> Processing…</>
+                    : <><CheckCircle size={14}/> Confirm Receipt & Add to Fleet</>
+                  }
                 </button>
               </div>
             </form>
@@ -1484,7 +2048,14 @@ export default function ProcurementPage() {
             </div>
             <form onSubmit={handlePOSave} className="p-5 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700">Vendor *</label>
+                  <button type="button"
+                    onClick={() => setShowModal('vendor-po')}
+                    className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1 font-medium">
+                    <Plus size={11}/> New Vendor
+                  </button>
+                </div>
                 <select className="input" value={poForm.vendor_id}
                   onChange={e => setPoForm(f => ({...f, vendor_id: e.target.value}))} required>
                   <option value="">Select vendor…</option>
@@ -1544,7 +2115,7 @@ export default function ProcurementPage() {
       )}
 
       {/* ── Vendor Modals ── */}
-      {(showModal === 'vendor' || showModal === 'vendor-inline') && (
+      {(showModal === 'vendor' || showModal === 'vendor-inline' || showModal === 'vendor-po') && (
         <VendorModal
           vendors={vendors}
           setVendors={setVendors}
@@ -1556,13 +2127,24 @@ export default function ProcurementPage() {
         />
       )}
 
-      {/* ── New Equipment Type Modal ── */}
+      {/* ── New Equipment Type Modal (from procurement form) ── */}
       {showModal === 'new-eq-type' && (
         <NewEquipmentTypeModal
           onCreated={handleEqTypeCreated}
           onClose={() => setShowModal('proc')}
           formLoading={formLoading}
           setFormLoading={setFormLoading}
+        />
+      )}
+
+      {/* ── New Equipment Type Modal (from receive modal) ── */}
+      {showModal === 'new-eq-type-receive' && (
+        <NewEquipmentTypeModal
+          onCreated={handleEqTypeCreatedForReceive}
+          onClose={() => { setReceiveNewTypeItemId(null); setReceiveNewTypeSuggestedName(''); setShowModal('receive'); }}
+          formLoading={formLoading}
+          setFormLoading={setFormLoading}
+          initialName={receiveNewTypeSuggestedName}
         />
       )}
 
@@ -1582,6 +2164,31 @@ export default function ProcurementPage() {
       {/* ── PO Preview ── */}
       {previewPO  && <POPreviewModal  po={previewPO}    onClose={() => setPreviewPO(null)}/>}
       {previewProc && <ProcPreviewModal proc={previewProc} onClose={() => setPreviewProc(null)}/>}
+
+      <style>{`
+        @keyframes rcvFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+        @keyframes rcvSlideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes rcvFadeSlide {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes rcvPopIn {
+          0%   { opacity: 0; transform: scale(0.85); }
+          60%  { transform: scale(1.05); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes rcvShake {
+          0%,100% { transform: translateX(0); }
+          25%     { transform: translateX(-4px); }
+          75%     { transform: translateX(4px); }
+        }
+      `}</style>
     </div>
   );
 }

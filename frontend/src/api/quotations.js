@@ -2,6 +2,14 @@ import { supabase } from "../lib/supabaseClient";
 
 let _creating = false;
 
+function daysFromDates(start, end) {
+  if (!start || !end) return null;
+  const d1 = new Date(start);
+  const d2 = new Date(end);
+  if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 < d1) return null;
+  return Math.ceil((d2 - d1) / 86_400_000) + 1;
+}
+
 export async function getQuotations(filters = {}) {
   let query = supabase
     .from("quotations")
@@ -129,7 +137,7 @@ export async function createQuotation(payload, items) {
         return {
           quotation_id:      quotation.quotation_id,
           description:       (item.description ?? '').trim(),
-          quantity:          Number(item.quantity)  || 1,
+          quantity:          1,
           unit:              item.unit              ?? 'Days',
           unit_rate_kwd:     confirmedRate,
           equipment_id:      item.equipment_id      || null,
@@ -295,20 +303,20 @@ export async function updateQuotationItems(quotationId, items) {
 
   if (items?.length > 0) {
     // Explicitly pick only valid DB columns — never spread unknown fields.
-    const rows = items.map(item => ({
-      quotation_id:      quotationId,
-      description:       (item.description ?? '').trim(),
-      quantity:          Number(item.quantity)  || 1,
-      unit:              item.unit              ?? 'Days',
-      unit_rate_kwd:     Number(item.unit_rate_kwd ?? 0),
-      equipment_id:      item.equipment_id      || null,
-      rental_start_date: item.rental_start_date || null,
-      rental_end_date:   item.rental_end_date   || null,
-      discount_amount:   Number(item.discount_amount ?? 0),
-      // item_type  → not a DB column; excluded
-      // total_kwd  → DB DEFAULT; let DB compute it
-      // procurement_id → not a DB column; excluded
-    }));
+    const rows = items.map(item => {
+      const rate = Number(item.unit_rate_kwd ?? 0);
+      return {
+        quotation_id:      quotationId,
+        description:       (item.description ?? '').trim(),
+        quantity:          1,
+        unit:              item.unit              ?? 'Days',
+        unit_rate_kwd:     rate,
+        equipment_id:      item.equipment_id      || null,
+        rental_start_date: item.rental_start_date || null,
+        rental_end_date:   item.rental_end_date   || null,
+        discount_amount:   Number(item.discount_amount ?? 0),
+      };
+    });
 
     const { error: insertError } = await supabase
       .from("quotation_items")

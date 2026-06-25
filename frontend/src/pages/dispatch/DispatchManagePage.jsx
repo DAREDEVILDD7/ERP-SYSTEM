@@ -12,7 +12,7 @@ import {
   Plus, Truck, X, Loader2, RefreshCw, Search, Filter,
   ChevronDown, ChevronUp, CheckCircle,
   AlertTriangle, ArrowLeft, User, XCircle, Eye,
-  RotateCcw, SendHorizonal, Calendar,
+  RotateCcw, SendHorizonal, Calendar, Check, Pencil, Users, ClipboardList,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { supabase } from '../../lib/supabaseClient';
@@ -20,6 +20,7 @@ import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const STATUSES = ['All','Pending','Assigned','In Transit','Completed','Returned','Cancelled'];
+
 
 const STATUS_COLORS = {
   Pending:    'bg-yellow-50 text-yellow-700 border-yellow-200',
@@ -64,6 +65,18 @@ export default function DispatchManagePage() {
   const [quoteSearch,   setQuoteSearch]   = useState('');
   const [eqSearch,      setEqSearch]      = useState('');
   const [selectedQuote, setSelectedQuote] = useState(null);
+
+  // Multi-select for bulk assign
+  const [selectedDispatchIds, setSelectedDispatchIds] = useState(new Set());
+  const [showBulkAssign,      setShowBulkAssign]      = useState(false);
+  const [bulkAssignForm,      setBulkAssignForm]      = useState({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
+  const [bulkPerNotes,        setBulkPerNotes]        = useState({});
+  const [bulkAssigning,       setBulkAssigning]       = useState(false);
+
+  // Inline notes editing
+  const [editingNotesId,  setEditingNotesId]  = useState(null);
+  const [notesEditValue,  setNotesEditValue]  = useState('');
+  const [savingNotes,     setSavingNotes]     = useState(false);
 
   // Cancel modal
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -162,20 +175,38 @@ export default function DispatchManagePage() {
     if (selectedEqIds.length === 0) return toast.error('Select at least one equipment item');
     if (!form.destination.trim())   return toast.error('Enter destination');
     setFormLoading(true);
+    const errors = [];
+    let created = 0;
     try {
-      await createDispatch({
-        ...form,
-        assigned_by:  profile.user_id,
-        quotation_id: form.quotation_id || null,
-        equipment_id: selectedEqIds[0],
-        dispatch_type: 'Full',
-      }, selectedEqIds);
-      toast.success(`Dispatch created with ${selectedEqIds.length} item(s)`);
+      // Create one dispatch per equipment item so each is separately trackable
+      for (const eqId of selectedEqIds) {
+        try {
+          await createDispatch({
+            ...form,
+            assigned_by:  profile.user_id,
+            quotation_id: form.quotation_id || null,
+            equipment_id: eqId,
+            dispatch_type: 'Full',
+          }, [eqId]);
+          created++;
+        } catch (itemErr) {
+          console.error('[handleSave] Dispatch failed for equipment', eqId, itemErr);
+          errors.push(eqId);
+        }
+      }
+
+      if (errors.length === 0) {
+        toast.success(`${created} dispatch order${created !== 1 ? 's' : ''} created`);
+      } else if (created > 0) {
+        toast(`${created} dispatch${created !== 1 ? 'es' : ''} created · ${errors.length} failed`, { icon: '⚠️' });
+      } else {
+        throw new Error(`All ${errors.length} dispatch orders failed`);
+      }
       setShowForm(false);
       resetForm();
       load();
     } catch (err) {
-      toast.error(err.message || 'Failed to create dispatch');
+      toast.error(err.message || 'Failed to create dispatches');
     } finally {
       setFormLoading(false);
     }
@@ -184,6 +215,83 @@ export default function DispatchManagePage() {
   const resetForm = () => {
     setForm({ quotation_id:'', driver_name:'', vehicle_type:'', vehicle_plate:'', destination:'', dispatch_date:'', return_date:'', notes:'', status:'Pending' });
     setSelectedEqIds([]); setSelectedQuote(null); setQuoteSearch(''); setEqSearch('');
+  };
+
+  // ── Multi-select helpers ──────────────────────────────────────────────────
+  const toggleDispatchSelect = (id) => {
+    setSelectedDispatchIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const filteredPendingIds = filtered.filter(d => d.status === 'Pending').map(d => d.dispatch_id);
+  const allPendingSelected = filteredPendingIds.length > 0 && filteredPendingIds.every(id => selectedDispatchIds.has(id));
+
+  const toggleSelectAll = () => {
+    if (allPendingSelected) {
+      setSelectedDispatchIds(new Set());
+    } else {
+      setSelectedDispatchIds(new Set(filteredPendingIds));
+    }
+  };
+
+  const clearSelection = () => setSelectedDispatchIds(new Set());
+
+  // ── Bulk Assign ───────────────────────────────────────────────────────────
+  const handleBulkAssign = async () => {
+    if (!bulkAssignForm.driver_name.trim()) return toast.error('Enter driver name');
+    const ids = [...selectedDispatchIds];
+    setBulkAssigning(true);
+    let succeeded = 0;
+    const errors = [];
+    for (const id of ids) {
+      try {
+        const dispatch = dispatches.find(d => d.dispatch_id === id);
+        if (!dispatch || dispatch.status !== 'Pending') continue;
+        await updateDispatch(id, {
+          status:        'Assigned',
+          driver_name:   bulkAssignForm.driver_name,
+          vehicle_type:  bulkAssignForm.vehicle_type  || null,
+          vehicle_plate: bulkAssignForm.vehicle_plate || null,
+          notes:         bulkPerNotes[id] || dispatch.notes || null,
+          assigned_by:   profile.user_id,
+        });
+        succeeded++;
+      } catch (err) {
+        console.error('[handleBulkAssign] Failed for dispatch', id, err);
+        errors.push(id);
+      }
+    }
+    setBulkAssigning(false);
+    if (errors.length === 0) {
+      toast.success(`${succeeded} dispatch${succeeded !== 1 ? 'es' : ''} assigned to ${bulkAssignForm.driver_name}`);
+    } else if (succeeded > 0) {
+      toast(`${succeeded} assigned · ${errors.length} failed`, { icon: '⚠️' });
+    } else {
+      toast.error(`Failed to assign all ${errors.length} dispatches`);
+    }
+    setSelectedDispatchIds(new Set());
+    setShowBulkAssign(false);
+    setBulkAssignForm({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
+    setBulkPerNotes({});
+    load();
+  };
+
+  // ── Inline Notes Save ─────────────────────────────────────────────────────
+  const saveNotes = async (dispatchId) => {
+    setSavingNotes(true);
+    try {
+      await updateDispatch(dispatchId, { notes: notesEditValue.trim() || null });
+      toast.success('Notes saved');
+      setEditingNotesId(null);
+      load();
+    } catch {
+      toast.error('Failed to save notes');
+    } finally {
+      setSavingNotes(false);
+    }
   };
 
   // ── Cancel ────────────────────────────────────────────────────────────────
@@ -563,7 +671,9 @@ export default function DispatchManagePage() {
             <button type="submit" disabled={formLoading || selectedEqIds.length === 0}
               className="btn-primary flex items-center gap-2 disabled:opacity-60">
               {formLoading && <Loader2 size={15} className="animate-spin"/>}
-              {formLoading ? 'Creating…' : `Create Dispatch (${selectedEqIds.length} items)`}
+              {formLoading
+                ? `Creating ${selectedEqIds.length} dispatch order${selectedEqIds.length !== 1 ? 's' : ''}…`
+                : `Create ${selectedEqIds.length} Dispatch Order${selectedEqIds.length !== 1 ? 's' : ''}`}
             </button>
           </div>
         </form>
@@ -657,6 +767,17 @@ export default function DispatchManagePage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
+                  {canWrite && (
+                    <th className="w-10 px-3 py-3">
+                      {filteredPendingIds.length > 0 && (
+                        <button type="button" onClick={toggleSelectAll}
+                          className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center transition-all',
+                            allPendingSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300 hover:border-primary-400')}>
+                          {allPendingSelected && <Check size={12} className="text-white"/>}
+                        </button>
+                      )}
+                    </th>
+                  )}
                   <th className="w-8 px-3 py-3"></th>
                   <th className="text-left px-4 py-3">ID</th>
                   <th className="text-left px-4 py-3">Quotation / Customer</th>
@@ -681,8 +802,22 @@ export default function DispatchManagePage() {
                   return (
                     <React.Fragment key={d.dispatch_id}>
                       <tr
-                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                        className={clsx('transition-colors cursor-pointer',
+                          selectedDispatchIds.has(d.dispatch_id) ? 'bg-primary-50 hover:bg-primary-50' : 'hover:bg-gray-50')}
+                        style={{ animation: 'dmRowFadeIn 0.25s ease both' }}
                         onClick={() => setExpandedId(isExpanded ? null : d.dispatch_id)}>
+                        {canWrite && (
+                          <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                            {d.status === 'Pending' && (
+                              <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
+                                className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-150',
+                                  selectedDispatchIds.has(d.dispatch_id)
+                                    ? 'border-primary-500 bg-primary-500 scale-110' : 'border-gray-300 hover:border-primary-400')}>
+                                {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
+                              </button>
+                            )}
+                          </td>
+                        )}
                         <td className="px-3 py-3 text-gray-400">
                           {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
                         </td>
@@ -762,7 +897,7 @@ export default function DispatchManagePage() {
                               )}
 
                               {/* Return Items */}
-                              {['In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
+                              {['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
                                 <button onClick={() => openReturnItems(d)}
                                   className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap">
                                   <RotateCcw size={11}/> Return Items
@@ -783,8 +918,8 @@ export default function DispatchManagePage() {
 
                       {/* Expanded row — item-level detail */}
                       {isExpanded && (
-                        <tr className="bg-gray-50/80">
-                          <td colSpan={canWrite ? 11 : 10} className="px-6 py-4">
+                        <tr className="bg-gray-50/80" style={{ animation: 'dmSlideDown 0.2s ease' }}>
+                          <td colSpan={canWrite ? 12 : 10} className="px-6 py-4">
                             <div className="space-y-3">
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
                                 Equipment Items ({totalItems})
@@ -845,11 +980,43 @@ export default function DispatchManagePage() {
                                 </div>
                               )}
 
-                              {d.notes && (
-                                <div className="bg-yellow-50 rounded-lg px-3 py-2 text-xs text-yellow-700">
-                                  <span className="font-medium">Notes:</span> {d.notes}
+                              {/* Inline notes editor */}
+                              {editingNotesId === d.dispatch_id ? (
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-2"
+                                  style={{ animation: 'dmPopIn 0.18s ease' }}>
+                                  <p className="text-xs font-medium text-yellow-700">Edit Notes</p>
+                                  <textarea className="input text-xs resize-y w-full" rows={2}
+                                    value={notesEditValue}
+                                    onChange={e => setNotesEditValue(e.target.value)}
+                                    placeholder="Add dispatch notes…"
+                                    autoFocus/>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => saveNotes(d.dispatch_id)} disabled={savingNotes}
+                                      className="text-xs bg-primary-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50">
+                                      {savingNotes ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>} Save
+                                    </button>
+                                    <button onClick={() => setEditingNotesId(null)}
+                                      className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancel</button>
+                                  </div>
                                 </div>
-                              )}
+                              ) : d.notes ? (
+                                <div className="bg-yellow-50 rounded-lg px-3 py-2 text-xs text-yellow-700 flex items-start justify-between gap-2">
+                                  <span><span className="font-medium">Notes:</span> {d.notes}</span>
+                                  {canWrite && !['Cancelled'].includes(d.status) && (
+                                    <button type="button"
+                                      onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(d.notes ?? ''); }}
+                                      className="shrink-0 text-yellow-500 hover:text-yellow-700 p-0.5 transition-colors">
+                                      <Pencil size={11}/>
+                                    </button>
+                                  )}
+                                </div>
+                              ) : canWrite && !['Cancelled','Returned'].includes(d.status) ? (
+                                <button type="button"
+                                  onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(''); }}
+                                  className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                                  <Pencil size={11}/> Add notes
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
@@ -870,16 +1037,27 @@ export default function DispatchManagePage() {
               const totalItems      = d.dispatch_items?.length ?? 0;
 
               return (
-                <div key={d.dispatch_id} className="card p-4">
+                <div key={d.dispatch_id}
+                  className={clsx('card p-4 transition-colors', selectedDispatchIds.has(d.dispatch_id) && 'ring-2 ring-primary-300 bg-primary-50/30')}
+                  style={{ animation: 'dmRowFadeIn 0.25s ease both' }}>
                   <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-mono text-xs text-gray-400">{d.dispatch_id}</p>
-                      {d.quotation_id && (
-                        <button onClick={() => setPreviewQuote(d.quotations)}
-                          className="text-xs text-primary-600 hover:underline flex items-center gap-1">
-                          <Eye size={11}/> {d.quotation_id}
+                    <div className="flex items-start gap-2">
+                      {canWrite && d.status === 'Pending' && (
+                        <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
+                          className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center mt-0.5 shrink-0 transition-all',
+                            selectedDispatchIds.has(d.dispatch_id) ? 'border-primary-500 bg-primary-500' : 'border-gray-300')}>
+                          {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
                         </button>
                       )}
+                      <div>
+                        <p className="font-mono text-xs text-gray-400">{d.dispatch_id}</p>
+                        {d.quotation_id && (
+                          <button onClick={() => setPreviewQuote(d.quotations)}
+                            className="text-xs text-primary-600 hover:underline flex items-center gap-1">
+                            <Eye size={11}/> {d.quotation_id}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
                       <StatusBadge status={d.status}/>
@@ -916,7 +1094,7 @@ export default function DispatchManagePage() {
                     {canWrite && ['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
                       <button onClick={() => openDispatchItems(d)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg">Dispatch Items</button>
                     )}
-                    {canWrite && ['In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
+                    {canWrite && ['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
                       <button onClick={() => openReturnItems(d)} className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg">Return Items</button>
                     )}
                     {canWrite && !['Cancelled','Returned'].includes(d.status) && (
@@ -931,10 +1109,139 @@ export default function DispatchManagePage() {
         </>
       )}
 
+      {/* ── Floating Bulk Action Bar ── */}
+      {selectedDispatchIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900 text-white pl-4 pr-3 py-3 rounded-2xl shadow-2xl"
+          style={{ animation: 'dmBulkBarSlide 0.28s cubic-bezier(0.34,1.56,0.64,1)' }}>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold tabular-nums">{selectedDispatchIds.size}</span>
+            <span className="text-gray-400 text-sm">dispatch{selectedDispatchIds.size !== 1 ? 'es' : ''} selected</span>
+          </div>
+          <div className="w-px h-5 bg-white/20"/>
+          <button onClick={() => setShowBulkAssign(true)}
+            className="flex items-center gap-1.5 text-sm bg-primary-500 hover:bg-primary-400 active:bg-primary-600 px-3 py-1.5 rounded-xl font-medium transition-colors">
+            <Users size={14}/> Assign to Driver
+          </button>
+          <button onClick={clearSelection}
+            className="text-gray-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10 ml-0.5">
+            <X size={15}/>
+          </button>
+        </div>
+      )}
+
+      {/* ── Bulk Assign Modal ── */}
+      {showBulkAssign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10 rounded-t-2xl">
+              <div>
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <Users size={16} className="text-primary-500"/> Bulk Assign Driver
+                </h3>
+                <p className="text-sm text-gray-400">{selectedDispatchIds.size} dispatch{selectedDispatchIds.size !== 1 ? 'es' : ''} · all will be set to Assigned</p>
+              </div>
+              <button onClick={() => setShowBulkAssign(false)} className="text-gray-400 hover:text-gray-600 p-1"><X size={18}/></button>
+            </div>
+
+            <div className="p-5 space-y-5">
+              {/* Shared driver fields */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                  <Truck size={14} className="text-gray-400"/> Driver & Vehicle <span className="text-red-500 text-xs">*</span>
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Driver Name *</label>
+                    <input className="input" placeholder="Full name"
+                      value={bulkAssignForm.driver_name}
+                      onChange={e => setBulkAssignForm(f => ({...f, driver_name: e.target.value}))}
+                      autoFocus/>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
+                    <input className="input" placeholder="e.g. Flatbed"
+                      value={bulkAssignForm.vehicle_type}
+                      onChange={e => setBulkAssignForm(f => ({...f, vehicle_type: e.target.value}))}/>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Vehicle Plate</label>
+                    <input className="input" placeholder="KWI 1234"
+                      value={bulkAssignForm.vehicle_plate}
+                      onChange={e => setBulkAssignForm(f => ({...f, vehicle_plate: e.target.value}))}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-dispatch notes */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
+                  <ClipboardList size={14} className="text-gray-400"/> Per-Dispatch Notes
+                </p>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {[...selectedDispatchIds].map((id, idx) => {
+                    const d = dispatches.find(x => x.dispatch_id === id);
+                    if (!d) return null;
+                    const eqItem = d.dispatch_items?.[0]?.equipment_units;
+                    const eqLabel = eqItem
+                      ? `${eqItem.equipment_types?.name ?? ''} ${eqItem.capacity ?? ''}`.trim()
+                      : null;
+                    return (
+                      <div key={id}
+                        className="border border-gray-100 rounded-xl p-3 space-y-2 hover:border-gray-200 transition-colors"
+                        style={{ animation: `dmPopIn 0.2s ease ${idx * 0.04}s both` }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-mono text-gray-400 truncate">{id}</p>
+                            {d.quotations?.customers?.company_name && (
+                              <p className="text-sm font-medium text-gray-800 truncate">{d.quotations.customers.company_name}</p>
+                            )}
+                            <p className="text-xs text-gray-500 truncate">→ {d.destination}</p>
+                            {eqLabel && <p className="text-xs text-gray-400">{eqLabel}{d.dispatch_items?.length > 1 ? ` +${d.dispatch_items.length - 1} more` : ''}</p>}
+                          </div>
+                          <StatusBadge status={d.status}/>
+                        </div>
+                        {d.notes && (
+                          <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-2 py-1.5">
+                            Existing: {d.notes}
+                          </p>
+                        )}
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Notes for this dispatch</label>
+                          <input className="input text-xs"
+                            placeholder={d.notes ? 'Override notes…' : 'Special instructions…'}
+                            value={bulkPerNotes[id] ?? ''}
+                            onChange={e => setBulkPerNotes(prev => ({...prev, [id]: e.target.value}))}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={() => setShowBulkAssign(false)} className="btn-secondary">Cancel</button>
+                <button onClick={handleBulkAssign}
+                  disabled={bulkAssigning || !bulkAssignForm.driver_name.trim()}
+                  className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  {bulkAssigning && <Loader2 size={14} className="animate-spin"/>}
+                  {bulkAssigning
+                    ? `Assigning ${selectedDispatchIds.size}…`
+                    : `Assign ${selectedDispatchIds.size} Dispatch${selectedDispatchIds.size !== 1 ? 'es' : ''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Assign Driver Modal ── */}
       {assignTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <Truck size={18} className="text-primary-500"/> Assign Driver & Vehicle
             </h3>
@@ -982,8 +1289,10 @@ export default function DispatchManagePage() {
 
       {/* ── Dispatch Items Modal ── */}
       {dispatchItemsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -1158,8 +1467,10 @@ export default function DispatchManagePage() {
 
       {/* ── Return Items Modal ── */}
       {returnModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] overflow-y-auto"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white z-10">
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
@@ -1171,6 +1482,12 @@ export default function DispatchManagePage() {
             </div>
 
             <div className="p-5 space-y-4">
+              {returnModal?.notes && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800 flex items-start gap-2">
+                  <ClipboardList size={14} className="text-yellow-500 mt-0.5 shrink-0"/>
+                  <div><span className="font-medium">Dispatch notes:</span> {returnModal.notes}</div>
+                </div>
+              )}
               <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-xs text-green-700">
                 <p className="font-medium mb-1">Partial return supported</p>
                 <p>Select which items are being returned now. Unselected items remain Dispatched (outstanding). You can set an extended return date for items not yet returned.</p>
@@ -1289,8 +1606,10 @@ export default function DispatchManagePage() {
 
       {/* ── Cancel Modal ── */}
       {cancelTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
               <XCircle size={18} className="text-red-500"/> Cancel Dispatch
             </h3>
@@ -1320,8 +1639,10 @@ export default function DispatchManagePage() {
 
       {/* ── Quotation Preview Popup ── */}
       {previewQuote && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          style={{ animation: 'dmFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+            style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <div className="flex items-center justify-between p-5 border-b border-gray-100 sticky top-0 bg-white">
               <div>
                 <h3 className="font-semibold text-gray-900">{previewQuote.quotation_id}</h3>
@@ -1361,6 +1682,15 @@ export default function DispatchManagePage() {
           </div>
         </div>
       )}
+      <style>{`
+        @keyframes dmFadeIn      { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes dmSlideUp     { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes dmSlideDown   { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes dmRowFadeIn   { from { opacity: 0; transform: translateX(-6px) } to { opacity: 1; transform: translateX(0) } }
+        @keyframes dmBulkBarSlide { from { opacity: 0; transform: translate(-50%, 20px) scale(0.94) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
+        @keyframes dmCheckBounce { 0% { transform: scale(1) } 40% { transform: scale(1.25) } 75% { transform: scale(0.9) } 100% { transform: scale(1) } }
+        @keyframes dmPopIn       { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
+      `}</style>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Component } from "react";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/common/ProtectedRoute";
@@ -18,12 +19,48 @@ import ProcurementPage from "./pages/procurement/ProcurementPage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[ErrorBoundary]', error, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-8">
+          <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center space-y-4">
+            <div className="text-4xl">⚠️</div>
+            <h2 className="text-xl font-semibold text-gray-800">Something went wrong</h2>
+            <p className="text-sm text-gray-500">
+              An unexpected error occurred. Please refresh the page to continue.
+            </p>
+            <button
+              onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+              className="btn btn-primary w-full"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const Placeholder = ({ name }) => (
   <div className="card p-8 text-center text-gray-400">{name} — coming soon</div>
 );
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
@@ -134,5 +171,6 @@ export default function App() {
         </AuthProvider>
       </QueryClientProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }

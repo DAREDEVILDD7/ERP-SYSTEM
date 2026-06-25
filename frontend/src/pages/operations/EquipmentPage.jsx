@@ -552,12 +552,12 @@ export default function EquipmentPage() {
                   <span
                     className={clsx(
                       "badge border text-xs",
-                      u.procurements?.type === "Lease"
+                      u.procurement_type === "Lease"
                         ? "bg-purple-50 text-purple-700 border-purple-100"
                         : "bg-blue-50 text-blue-700 border-blue-100",
                     )}
                   >
-                    {u.procurements?.type ?? "Purchase"}
+                    {u.procurement_type ?? "Purchase"}
                   </span>
                   <StatusBadge status={u.status} />
                 </div>
@@ -638,19 +638,19 @@ export default function EquipmentPage() {
                             <span
                               className={clsx(
                                 "badge border text-xs",
-                                u.procurements?.type === "Lease"
+                                u.procurement_type === "Lease"
                                   ? "bg-purple-50 text-purple-700 border-purple-100"
                                   : "bg-blue-50 text-blue-700 border-blue-100",
                               )}
                             >
-                              {u.procurements?.type ?? "Purchase"}
+                              {u.procurement_type ?? "Purchase"}
                             </span>
-                            {u.procurements?.type === "Lease" &&
-                              u.procurements?.lease_end_date && (
+                            {u.procurement_type === "Lease" &&
+                              u.lease_end_date && (
                                 <p className="text-gray-400 mt-0.5">
                                   Until{" "}
                                   {format(
-                                    new Date(u.procurements.lease_end_date),
+                                    new Date(u.lease_end_date),
                                     "dd MMM yy",
                                   )}
                                 </p>
@@ -1251,9 +1251,11 @@ export default function EquipmentPage() {
                     {previewUnit.procurements?.title}
                   </p>
                   <p className="text-xs text-purple-500">
-                    {previewUnit.procurements?.type}
-                    {previewUnit.procurements?.lease_end_date &&
-                      ` · Lease until ${format(new Date(previewUnit.procurements.lease_end_date), "dd MMM yyyy")}`}
+                    {previewUnit.procurement_type ?? "Purchase"}
+                    {previewUnit.procurement_type === "Lease" && previewUnit.lease_end_date &&
+                      ` · Lease until ${format(new Date(previewUnit.lease_end_date), "dd MMM yyyy")}`}
+                    {previewUnit.procurement_type === "Lease" && previewUnit.lease_start_date &&
+                      ` (from ${format(new Date(previewUnit.lease_start_date), "dd MMM yyyy")})`}
                   </p>
                 </div>
               )}

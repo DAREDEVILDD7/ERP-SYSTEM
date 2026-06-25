@@ -96,11 +96,15 @@ export default function ChatPage() {
       .finally(() => setPreviewLoading(false));
   }, [previewReqId]);
 
-  const filteredThreads = threads.filter(t =>
-    !search ||
-    t.requirements?.requirement_summary?.toLowerCase().includes(search.toLowerCase()) ||
-    t.requirements?.customers?.company_name?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredThreads = threads.filter(t => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return (
+      t.related_requirement?.toLowerCase().includes(s) ||
+      t.requirements?.requirement_summary?.toLowerCase().includes(s) ||
+      t.requirements?.customers?.company_name?.toLowerCase().includes(s)
+    );
+  });
 
   const activeThread = threads.find(t => t.related_requirement === activeReq);
 

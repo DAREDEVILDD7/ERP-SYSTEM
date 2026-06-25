@@ -978,16 +978,21 @@ export default function RequirementForm({ existing, onSuccess, onCancel }) {
       }
 
       const payload = { ...form, created_by: profile.user_id };
+      // Expand each item by its quantity into individual rows (qty=3 → 3 rows
+      // with quantity=1 each) so the quotation auto-populates 3 distinct line items.
       const cleanItems = items
         .filter(i => i.description?.trim())
-        .map(({ item_mode, ...i }) => ({       // eslint-disable-line no-unused-vars
-          equipment_id:      i.equipment_id      || null,
-          equipment_type_id: i.equipment_type_id || null,
-          description:       i.description.trim(),
-          quantity:          Math.max(1, Number(i.quantity) || 1),
-          capacity:          i.capacity          || null,
-          notes:             i.notes             || null,
-        }));
+        .flatMap(({ item_mode, ...i }) => {      // eslint-disable-line no-unused-vars
+          const qty = Math.max(1, Number(i.quantity) || 1);
+          return Array.from({ length: qty }, () => ({
+            equipment_id:      i.equipment_id      || null,
+            equipment_type_id: i.equipment_type_id || null,
+            description:       i.description.trim(),
+            quantity:          1,
+            capacity:          i.capacity          || null,
+            notes:             i.notes             || null,
+          }));
+        });
 
       if (isEdit) {
         await updateRequirement(existing.requirement_id, form, cleanItems);
@@ -1280,10 +1285,16 @@ export default function RequirementForm({ existing, onSuccess, onCancel }) {
                           value={item.capacity} onChange={e => setItem(idx, 'capacity', e.target.value)}/>
                       </div>
                       <div className="col-span-6 sm:col-span-3">
-                        <label className="block text-xs text-gray-500 mb-1">Quantity</label>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Quantity
+                          <span className="text-gray-300 font-normal ml-1">(expands to separate items)</span>
+                        </label>
                         <input type="number" min="1" className="input text-sm text-center transition-all qty-no-spin"
                           value={item.quantity} onWheel={e => e.target.blur()}
-                          onChange={e => setItem(idx, 'quantity', Math.max(1, Number(e.target.value) || 1))}/>
+                          onChange={e => {
+                            const raw = e.target.value;
+                            setItem(idx, 'quantity', raw === '' ? '' : Math.max(1, parseInt(raw, 10) || 1));
+                          }}/>
                       </div>
                     </div>
 

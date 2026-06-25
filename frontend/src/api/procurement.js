@@ -185,9 +185,11 @@ export async function receiveProcurement(procurementId, items, userId) {
 
     // Add to equipment fleet if equipment_type_id specified
     if (item.equipment_type_id && item.received_qty > 0) {
-      const capacityPart = item.description?.includes(' — ')
-        ? item.description.split(' — ').slice(1).join(' — ').trim()
-        : null;
+      const capacityPart = item.capacity?.trim()
+        || (item.description?.includes(' — ')
+          ? item.description.split(' — ').slice(1).join(' — ').trim()
+          : null)
+        || null;
 
       // Validate daily rate
       const dailyRate = Number(item.daily_rate_kwd);
@@ -219,15 +221,116 @@ export async function receiveProcurement(procurementId, items, userId) {
         });
       }
       if (units.length > 0) {
-        const { error } = await supabase.from('equipment_units').insert(units);
+        const { data: insertedUnits, error } = await supabase
+          .from('equipment_units')
+          .insert(units)
+          .select('equipment_id');
         if (error) {
-          // Provide a clear message for duplicate serial number constraint violation
           if (error.code === '23505' && error.message?.includes('serial_number')) {
             const match = error.message.match(/Key \(serial_number\)=\(([^)]+)\)/);
             const dupSerial = match ? match[1] : 'unknown';
             throw new Error(`Serial number "${dupSerial}" already exists in the fleet. Each unit must have a unique serial number.`);
           }
           throw error;
+        }
+
+        // Auto-link newly received units to quotation items that are still
+        // waiting for this equipment type (equipment_id = null).
+        // We update the link for ANY quotation status so that approval-time
+        // dispatch creation finds the equipment_id even when procurement was
+        // received before the quotation was approved.
+        // Dispatches are only created immediately for already-Approved quotations.
+        if (insertedUnits && insertedUnits.length > 0) {
+          try {
+            const { data: eqType } = await supabase
+              .from('equipment_types')
+              .select('name')
+              .eq('type_id', item.equipment_type_id)
+              .single();
+
+            if (eqType) {
+              // Fetch ALL quotation items with no equipment_id — across all statuses
+              const { data: allPendingItems } = await supabase
+                .from('quotation_items')
+                .select('item_id, quotation_id, description, rental_start_date, rental_end_date')
+                .is('equipment_id', null)
+                .order('created_at', { ascending: true });
+
+              if (allPendingItems && allPendingItems.length > 0) {
+                // Fetch quotation metadata for all matched quotations in one round-trip
+                const allQIds = [...new Set(allPendingItems.map(i => i.quotation_id))];
+                const { data: allQuotes } = await supabase
+                  .from('quotations')
+                  .select('quotation_id, status, requirement_id, requirements(location)')
+                  .in('quotation_id', allQIds);
+                const quoteMap = Object.fromEntries((allQuotes ?? []).map(q => [q.quotation_id, q]));
+
+                const typeLower = eqType.name.toLowerCase().trim();
+                const matching  = allPendingItems.filter(qi => {
+                  const descPart = (qi.description || '').split(' — ')[0].trim().toLowerCase();
+                  // Exact match OR type name is a prefix (handles capacity variants like "Crane 25 Ton")
+                  return descPart === typeLower || descPart.startsWith(typeLower + ' ');
+                });
+
+                const availableUnits = [...insertedUnits];
+                for (const qi of matching) {
+                  if (availableUnits.length === 0) break;
+                  const unit  = availableUnits.shift();
+                  const quote = quoteMap[qi.quotation_id];
+
+                  // Always write the equipment link — approval-time dispatch creation depends on it
+                  await supabase
+                    .from('quotation_items')
+                    .update({ equipment_id: unit.equipment_id })
+                    .eq('item_id', qi.item_id);
+
+                  // Create dispatch immediately only if the quotation is already Approved
+                  if (quote?.status === 'Approved') {
+                    // Idempotency: skip if a non-cancelled dispatch already exists
+                    const { data: existingDsp } = await supabase
+                      .from('dispatches')
+                      .select('dispatch_id')
+                      .eq('quotation_id', qi.quotation_id)
+                      .eq('equipment_id', unit.equipment_id)
+                      .neq('status', 'Cancelled')
+                      .limit(1);
+
+                    if (!existingDsp?.length) {
+                      const { data: dispatch, error: dErr } = await supabase
+                        .from('dispatches')
+                        .insert({
+                          quotation_id:   qi.quotation_id,
+                          requirement_id: quote.requirement_id || null,
+                          equipment_id:   unit.equipment_id,
+                          destination:    quote.requirements?.location || '',
+                          status:         'Pending',
+                          dispatch_type:  'Full',
+                          dispatch_date:  qi.rental_start_date || null,
+                          return_date:    qi.rental_end_date   || null,
+                          items_total:    1,
+                          assigned_by:    userId,
+                          notes:          qi.description || null,
+                        })
+                        .select()
+                        .single();
+
+                      if (!dErr && dispatch) {
+                        await supabase
+                          .from('dispatch_items')
+                          .insert({
+                            dispatch_id:     dispatch.dispatch_id,
+                            equipment_id:    unit.equipment_id,
+                            dispatch_status: 'Pending',
+                          });
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (autoLinkErr) {
+            console.warn('[receiveProcurement] Auto-link to pending quotations failed (non-blocking):', autoLinkErr);
+          }
         }
       }
     }
