@@ -12,7 +12,7 @@ module.exports = {
           700: '#2f44ad',
           900: '#1e3a8a',
         },
-        surface: '#f8f9fa',
+        surface: '#e2e8f0',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],

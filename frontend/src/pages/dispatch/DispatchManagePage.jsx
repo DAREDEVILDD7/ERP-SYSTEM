@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import {
   getDispatchesFast, createDispatch, updateDispatch, cancelDispatch,
   getApprovedQuotations, getDispatchableEquipment,
@@ -13,14 +14,14 @@ import {
   ChevronDown, ChevronUp, CheckCircle,
   AlertTriangle, ArrowLeft, User, XCircle, Eye,
   RotateCcw, SendHorizonal, Calendar, Check, Pencil, Users, ClipboardList,
+  MapPin, Package, ArrowRight, Activity, Clock, TrendingUp,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const STATUSES = ['All','Pending','Assigned','In Transit','Completed','Returned','Cancelled'];
-
+const DISPATCH_TABLES = ['dispatches','dispatch_items','equipment_units'];
 
 const STATUS_COLORS = {
   Pending:    'bg-yellow-50 text-yellow-700 border-yellow-200',
@@ -31,24 +32,48 @@ const STATUS_COLORS = {
   Cancelled:  'bg-red-50 text-red-600 border-red-200',
 };
 
-// const ITEM_STATUS_COLORS = {
-//   Pending:    'bg-yellow-50 text-yellow-600',
-//   Dispatched: 'bg-blue-50 text-blue-700',
-//   Returned:   'bg-green-50 text-green-700',
-// };
+function EquipmentImage({ typeId, imageUrl, typeName, className = '', contain = false }) {
+  const [failed, setFailed] = useState(false);
+  const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+
+  const src = imageUrl ||
+    (typeId && supabaseUrl
+      ? `${supabaseUrl}/storage/v1/object/public/equipment-images/types/${typeId}.jpg`
+      : null);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
+    return (
+      <div className={clsx('flex flex-col items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200', className)}>
+        <Truck size={22} className="text-gray-300" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={typeName || 'Equipment'}
+      className={clsx(contain ? 'object-contain' : 'object-cover', className)}
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function DispatchManagePage() {
   const { profile, role, loading: authLoading } = useAuth();
 
-
   const [dispatches,   setDispatches]   = useState([]);
   const [quotations,   setQuotations]   = useState([]);
   const [allEquipment, setAllEquipment] = useState([]);
-  // const [loading,      setLoading]      = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [showForm,     setShowForm]     = useState(false);
   const [expandedId,   setExpandedId]   = useState(null);
   const [previewQuote, setPreviewQuote] = useState(null);
+  const [selectedDispatchId, setSelectedDispatchId] = useState(null);
 
   // Search + filter state
   const [search,       setSearch]       = useState('');
@@ -83,22 +108,20 @@ export default function DispatchManagePage() {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelling,   setCancelling]   = useState(false);
 
-  // Assign modal (Pending → Assigned with driver details)
+  // Assign modal
   const [assignTarget, setAssignTarget] = useState(null);
   const [assignForm,   setAssignForm]   = useState({ driver_name:'', vehicle_type:'', vehicle_plate:'', notes:'' });
   const [assigning,    setAssigning]    = useState(false);
 
-  // ── Dispatch Items modal ──────────────────────────────────────────────────
+  // Dispatch Items modal
   const [dispatchItemsModal, setDispatchItemsModal] = useState(null);
   const [selectedItemIds,    setSelectedItemIds]    = useState([]);
   const [dispatchingItems,   setDispatchingItems]   = useState(false);
-  // Per-item driver assignment: { [item_id]: { driver_name, vehicle_type, vehicle_plate } }
-  // Also supports 'shared' mode where one driver applies to all selected items
-  const [driverMode,         setDriverMode]         = useState('shared'); // 'shared' | 'per-item'
+  const [driverMode,         setDriverMode]         = useState('shared');
   const [sharedDriver,       setSharedDriver]       = useState({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
   const [perItemDrivers,     setPerItemDrivers]     = useState({});
 
-  // ── Return Items modal ────────────────────────────────────────────────────
+  // Return Items modal
   const [returnModal,    setReturnModal]    = useState(null);
   const [returnSelects,  setReturnSelects]  = useState([]);
   const [returning,      setReturning]      = useState(false);
@@ -110,7 +133,7 @@ export default function DispatchManagePage() {
     if (authLoading || !profile || !role) return;
     try {
       const [d, q, e] = await Promise.all([
-        getDispatchesFast(statusFilter !== 'All' ? { status: statusFilter } : {}),
+        getDispatchesFast(),
         getApprovedQuotations(),
         getDispatchableEquipment(),
       ]);
@@ -121,17 +144,10 @@ export default function DispatchManagePage() {
       toast.error('Failed to load dispatch data');
       console.error(err);
     }
-  }, [authLoading, profile, role, statusFilter]);
+  }, [authLoading, profile, role]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    const ch = supabase.channel('dispatch-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatches' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'dispatch_items' }, load)
-      .subscribe();
-    return () => ch.unsubscribe();
-  }, [load]);
+  useRealtimeRefresh(DISPATCH_TABLES, load);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = dispatches.filter(d => {
@@ -158,10 +174,10 @@ export default function DispatchManagePage() {
     setSelectedQuote(q ?? null);
     setForm(f => ({ ...f, quotation_id: qId, destination: q?.requirements?.location ?? f.destination }));
     if (q?.quotation_items) {
-      const avail = q.quotation_items.filter(i => i.equipment_id && i.equipment_units?.status === 'Available').map(i => i.equipment_id);
-      setSelectedEqIds(avail);
+      const avail  = q.quotation_items.filter(i => i.equipment_id && i.equipment_units?.status === 'Available').map(i => i.equipment_id);
       const starts = q.quotation_items.filter(i => i.rental_start_date).map(i => i.rental_start_date);
       const ends   = q.quotation_items.filter(i => i.rental_end_date).map(i => i.rental_end_date);
+      setSelectedEqIds(avail);
       if (starts.length > 0) setForm(f => ({ ...f, dispatch_date: starts[0] }));
       if (ends.length > 0)   setForm(f => ({ ...f, return_date: ends[ends.length - 1] }));
     }
@@ -178,14 +194,13 @@ export default function DispatchManagePage() {
     const errors = [];
     let created = 0;
     try {
-      // Create one dispatch per equipment item so each is separately trackable
       for (const eqId of selectedEqIds) {
         try {
           await createDispatch({
             ...form,
-            assigned_by:  profile.user_id,
-            quotation_id: form.quotation_id || null,
-            equipment_id: eqId,
+            assigned_by:   profile.user_id,
+            quotation_id:  form.quotation_id || null,
+            equipment_id:  eqId,
             dispatch_type: 'Full',
           }, [eqId]);
           created++;
@@ -194,7 +209,6 @@ export default function DispatchManagePage() {
           errors.push(eqId);
         }
       }
-
       if (errors.length === 0) {
         toast.success(`${created} dispatch order${created !== 1 ? 's' : ''} created`);
       } else if (created > 0) {
@@ -328,7 +342,7 @@ export default function DispatchManagePage() {
     } finally { setAssigning(false); }
   };
 
-  // ── Dispatch Items (partial/full) ─────────────────────────────────────────
+  // ── Dispatch Items ────────────────────────────────────────────────────────
   const openDispatchItems = (dispatch) => {
     const pendingItems = (dispatch.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
     if (pendingItems.length === 0) return toast.error('No pending items to dispatch');
@@ -343,10 +357,8 @@ export default function DispatchManagePage() {
     if (selectedItemIds.length === 0) return toast.error('Select at least one item to dispatch');
     setDispatchingItems(true);
     try {
-      const totalItems = dispatchItemsModal.dispatch_items?.length ?? 0;
+      const totalItems  = dispatchItemsModal.dispatch_items?.length ?? 0;
       const pendingCount = (dispatchItemsModal.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending').length;
-
-      // Build driver info to pass to dispatchItems
       const driverInfo = driverMode === 'shared'
         ? {
             driver_name:   sharedDriver.driver_name   || dispatchItemsModal.driver_name,
@@ -356,45 +368,37 @@ export default function DispatchManagePage() {
           }
         : {
             total_items: totalItems,
-            // Per-item driver info stored separately; dispatch header uses first item's driver
             driver_name:   perItemDrivers[selectedItemIds[0]]?.driver_name   || dispatchItemsModal.driver_name || '',
             vehicle_type:  perItemDrivers[selectedItemIds[0]]?.vehicle_type  || dispatchItemsModal.vehicle_type || '',
             vehicle_plate: perItemDrivers[selectedItemIds[0]]?.vehicle_plate || dispatchItemsModal.vehicle_plate || '',
           };
 
-      await dispatchItems(
-        dispatchItemsModal.dispatch_id,
-        selectedItemIds,
-        driverInfo,
-      );
-
+      await dispatchItems(dispatchItemsModal.dispatch_id, selectedItemIds, driverInfo);
       toast.success(
         selectedItemIds.length === pendingCount
           ? `All ${selectedItemIds.length} item(s) dispatched`
           : `${selectedItemIds.length} of ${pendingCount} item(s) dispatched (partial dispatch)`
       );
-      setDispatchItemsModal(null);
-      setSelectedItemIds([]);
-      setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
-      setPerItemDrivers({});
+      setDispatchItemsModal(null); setSelectedItemIds([]);
+      setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); setPerItemDrivers({});
       load();
     } catch (err) { toast.error(err.message || 'Failed to dispatch items');
     } finally { setDispatchingItems(false); }
   };
 
-  // ── Return Items (partial/full) ───────────────────────────────────────────
+  // ── Return Items ──────────────────────────────────────────────────────────
   const openReturnItems = (dispatch) => {
     const dispatchedItems = (dispatch.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
     if (dispatchedItems.length === 0) return toast.error('No dispatched items to return');
     setReturnModal(dispatch);
     setReturnSelects(dispatchedItems.map(i => ({
-      item_id:               i.item_id,
-      equipment_id:          i.equipment_id,
-      equipment_name:        `${i.equipment_units?.equipment_types?.name ?? ''} ${i.equipment_units?.capacity ?? ''}`.trim(),
-      serial:                i.equipment_units?.serial_number ?? '',
-      selected:              true,
-      return_notes:          '',
-      extended_return_date:  '',
+      item_id:              i.item_id,
+      equipment_id:         i.equipment_id,
+      equipment_name:       `${i.equipment_units?.equipment_types?.name ?? ''} ${i.equipment_units?.capacity ?? ''}`.trim(),
+      serial:               i.equipment_units?.serial_number ?? '',
+      selected:             true,
+      return_notes:         '',
+      extended_return_date: '',
     })));
     setReturnDriver({ driver_name: dispatch.driver_name ?? '', vehicle_type: dispatch.vehicle_type ?? '', vehicle_plate: '' });
   };
@@ -406,15 +410,9 @@ export default function DispatchManagePage() {
     try {
       await returnItems(
         returnModal.dispatch_id,
-        toReturn.map(r => ({
-          item_id:               r.item_id,
-          return_notes:          r.return_notes,
-          extended_return_date:  r.extended_return_date || null,
-        })),
+        toReturn.map(r => ({ item_id: r.item_id, return_notes: r.return_notes, extended_return_date: r.extended_return_date || null })),
         profile.user_id
       );
-
-      // Update dispatch with return driver info if provided
       if (returnDriver.driver_name?.trim()) {
         try {
           await updateDispatch(returnModal.dispatch_id, {
@@ -426,16 +424,13 @@ export default function DispatchManagePage() {
           console.warn('[handleReturnItems] Failed to update return driver info:', driverErr);
         }
       }
-
-      const notReturned    = returnSelects.filter(r => !r.selected);
-      const extendedItems  = toReturn.filter(r => r.extended_return_date);
+      const notReturned   = returnSelects.filter(r => !r.selected);
+      const extendedItems = toReturn.filter(r => r.extended_return_date);
       let msg = `${toReturn.length} item(s) returned`;
       if (notReturned.length > 0)   msg += ` · ${notReturned.length} still outstanding`;
       if (extendedItems.length > 0) msg += ` · ${extendedItems.length} with extended dates`;
       toast.success(msg);
-
-      setReturnModal(null);
-      setReturnSelects([]);
+      setReturnModal(null); setReturnSelects([]);
       setReturnDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
       load();
     } catch (err) { toast.error(err.message || 'Failed to process returns');
@@ -475,7 +470,6 @@ export default function DispatchManagePage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-4">
-          {/* Step 1 — Quote */}
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">1</span>
@@ -502,9 +496,7 @@ export default function DispatchManagePage() {
                         <p className="text-xs text-gray-400">{q.quotation_id} · {q.requirements?.requirement_summary?.slice(0,50)}</p>
                         {q.approver && <p className="text-xs text-green-600">Approved by: {q.approver.name}</p>}
                       </div>
-                      <span className="text-sm font-semibold text-gray-600 ml-4">
-                        KWD {Number(q.total_amount_kwd).toLocaleString()}
-                      </span>
+                      <span className="text-sm font-semibold text-gray-600 ml-4">KWD {Number(q.total_amount_kwd).toLocaleString()}</span>
                     </div>
                   </button>
                 ))}
@@ -518,16 +510,13 @@ export default function DispatchManagePage() {
                     <p className="text-sm font-semibold text-green-800">{selectedQuote.quotation_id} — {selectedQuote.customers?.company_name}</p>
                     <p className="text-xs text-green-600 mt-0.5">{selectedQuote.requirements?.requirement_summary}</p>
                     {selectedQuote.approver && (
-                      <p className="text-xs text-green-500 mt-0.5 flex items-center gap-1">
-                        <User size={11}/> Approved by: {selectedQuote.approver.name}
-                      </p>
+                      <p className="text-xs text-green-500 mt-0.5 flex items-center gap-1"><User size={11}/> Approved by: {selectedQuote.approver.name}</p>
                     )}
                   </div>
                   <button type="button" onClick={() => { setSelectedQuote(null); setForm(f => ({...f, quotation_id:''})); setSelectedEqIds([]); }}>
                     <X size={16} className="text-green-400"/>
                   </button>
                 </div>
-
                 {quoteEquipment.length > 0 && (
                   <div className="mt-3 space-y-1">
                     <p className="text-xs font-medium text-green-700 mb-2">Equipment in quotation:</p>
@@ -559,23 +548,18 @@ export default function DispatchManagePage() {
             )}
           </div>
 
-          {/* Step 2 — Equipment */}
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">2</span>
               Select Equipment
               {selectedEqIds.length > 0 && (
-                <span className="ml-auto text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">
-                  {selectedEqIds.length} selected
-                </span>
+                <span className="ml-auto text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">{selectedEqIds.length} selected</span>
               )}
             </h3>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
-              <input className="input pl-9" placeholder="Search available equipment…"
-                value={eqSearch} onChange={e => setEqSearch(e.target.value)}/>
+              <input className="input pl-9" placeholder="Search available equipment…" value={eqSearch} onChange={e => setEqSearch(e.target.value)}/>
             </div>
-
             <div className="border border-gray-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
               {filteredEquipment.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">No available equipment</p>
@@ -602,7 +586,6 @@ export default function DispatchManagePage() {
                 );
               })}
             </div>
-
             {selectedEqIds.length > 0 && (
               <div className="bg-primary-50 rounded-xl p-3 space-y-1">
                 <p className="text-xs font-semibold text-primary-700 mb-2">Selected ({selectedEqIds.length} items):</p>
@@ -620,7 +603,6 @@ export default function DispatchManagePage() {
             )}
           </div>
 
-          {/* Step 3 — Details */}
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
               <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">3</span>
@@ -653,13 +635,6 @@ export default function DispatchManagePage() {
                 <input type="date" className="input" value={form.return_date} onChange={e => setForm(f => ({...f,return_date:e.target.value}))}/>
               </div>
             </div>
-
-            {/* Info box about partial dispatch */}
-            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
-              <p className="font-medium mb-1">ℹ Partial Dispatch Support</p>
-              <p>After creating this dispatch, you can dispatch individual items one by one or in groups. Each item tracks its own dispatch and return status.</p>
-            </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <textarea className="input resize-y" rows={2} value={form.notes} onChange={e => setForm(f => ({...f,notes:e.target.value}))}/>
@@ -681,14 +656,34 @@ export default function DispatchManagePage() {
     );
   }
 
-  // ── Dispatch list ─────────────────────────────────────────────────────────
+  // ── Dashboard ─────────────────────────────────────────────────────────────
+  const statsTotal     = dispatches.length;
+  const statsPending   = dispatches.filter(d => d.status === 'Pending').length;
+  const statsActive    = dispatches.filter(d => ['Assigned','In Transit'].includes(d.status)).length;
+  const statsCompleted = dispatches.filter(d => ['Completed','Returned'].includes(d.status)).length;
+
+  const ongoingDispatches = dispatches.filter(d => ['Pending','Assigned','In Transit'].includes(d.status));
+
+  const sel = selectedDispatchId
+    ? dispatches.find(d => d.dispatch_id === selectedDispatchId)
+    : ongoingDispatches[0] ?? null;
+
+  const selEq = sel ? (() => {
+    const type = sel.dispatch_items?.[0]?.equipment_units?.equipment_types;
+    const unit = sel.dispatch_items?.[0]?.equipment_units;
+    return { typeId: type?.type_id ?? null, typeName: type?.name ?? null, imageUrl: type?.image_url ?? null, serial: unit?.serial_number ?? null, capacity: unit?.capacity ?? null };
+  })() : null;
+
+  const selPendingItems    = (sel?.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
+  const selDispatchedItems = (sel?.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Dispatch Management</h2>
-          <p className="text-sm text-gray-400">{filtered.length} dispatches</p>
+          <h2 className="text-lg font-semibold text-gray-900">Dispatch Dashboard</h2>
+          <p className="text-sm text-gray-400">{dispatches.length} total dispatches</p>
         </div>
         <div className="flex gap-2">
           <button onClick={load} className="btn-secondary p-2"><RefreshCw size={16}/></button>
@@ -700,416 +695,639 @@ export default function DispatchManagePage() {
         </div>
       </div>
 
-      {/* Status filter */}
-      <div className="card p-3">
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {STATUSES.map(s => (
-            <button key={s} onClick={() => setStatusFilter(s)}
-              className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-                statusFilter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
-              {s}
-            </button>
-          ))}
-        </div>
+      {/* Stats Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: 'Total dispatches:',    value: statsTotal,     icon: Package,     numColor: 'text-gray-800',   iconBg: 'bg-gray-100',   iconColor: 'text-gray-500'   },
+          { label: 'Pickup packages:',     value: statsActive,    icon: Truck,       numColor: 'text-blue-600',   iconBg: 'bg-blue-50',    iconColor: 'text-blue-400'   },
+          { label: 'Pending packages:',    value: statsPending,   icon: Clock,       numColor: 'text-orange-500', iconBg: 'bg-orange-50',  iconColor: 'text-orange-400' },
+          { label: 'Packages delivered:',  value: statsCompleted, icon: CheckCircle, numColor: 'text-green-600',  iconBg: 'bg-green-50',   iconColor: 'text-green-500'  },
+        ].map(({ label, value, icon: Icon, numColor, iconBg, iconColor }) => (
+          <div key={label} className="card p-4 flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs text-gray-400 mb-1">{label}</p>
+              <p className={clsx('text-3xl font-bold tabular-nums leading-none', numColor)}>{value}</p>
+            </div>
+            <div className={clsx('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', iconBg)}>
+              <Icon size={20} className={iconColor}/>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* Search + filter bar */}
-      <div className="card p-4 space-y-3">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
-            <input className="input pl-9"
-              placeholder="Search by dispatch ID, quote ID, customer, driver, destination…"
-              value={search} onChange={e => setSearch(e.target.value)}/>
-            {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><X size={14}/></button>}
-          </div>
-          <button onClick={() => setShowFilters(v => !v)}
-            className={clsx('btn-secondary flex items-center gap-2', hasActiveFilters && 'ring-2 ring-primary-300')}>
-            <Filter size={15}/> Filters
-          </button>
-        </div>
+      {/* Ongoing Delivery */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-        {showFilters && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Driver</label>
-              <input className="input text-sm" placeholder="Filter…" value={driverSearch} onChange={e => setDriverSearch(e.target.value)}/>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Destination</label>
-              <input className="input text-sm" placeholder="Filter…" value={destSearch} onChange={e => setDestSearch(e.target.value)}/>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">From Date</label>
-              <input type="date" className="input text-sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">To Date</label>
-              <input type="date" className="input text-sm" value={dateTo} onChange={e => setDateTo(e.target.value)}/>
-            </div>
-            {hasActiveFilters && (
-              <div className="col-span-2 sm:col-span-4 flex justify-end">
-                <button onClick={() => { setDateFrom(''); setDateTo(''); setDriverSearch(''); setDestSearch(''); }}
-                  className="text-xs text-red-400 hover:underline">Clear filters</button>
+        {/* Left: Ongoing dispatch list */}
+        <div className="lg:col-span-2 card overflow-hidden flex flex-col" style={{ minHeight: '460px' }}>
+          <div className="px-4 py-3 border-b border-gray-100 shrink-0">
+            <h3 className="font-semibold text-gray-900">Ongoing Delivery</h3>
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {ongoingDispatches.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full py-12 text-center">
+                <Truck size={36} className="text-gray-200 mb-2"/>
+                <p className="text-sm text-gray-400">No active dispatches</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {ongoingDispatches.map(d => {
+                  const type  = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
+                  const unit  = d.dispatch_items?.[0]?.equipment_units;
+                  const isSel = sel?.dispatch_id === d.dispatch_id;
+                  return (
+                    <button key={d.dispatch_id} type="button"
+                      onClick={() => setSelectedDispatchId(d.dispatch_id)}
+                      className={clsx(
+                        'w-full text-left px-4 py-3.5 hover:bg-gray-50 transition-colors',
+                        isSel && 'bg-blue-50 border-l-[3px] border-l-blue-500'
+                      )}>
+                      <div className="flex items-start gap-3">
+                        {/* Left text */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] text-gray-400 mb-0.5">Dispatch ID:</p>
+                          <p className="font-bold text-gray-900 text-sm leading-tight truncate">{d.dispatch_id}</p>
+                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                            {type?.name && (
+                              <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.name}{unit?.capacity ? ` · ${unit.capacity}` : ''}</span>
+                            )}
+                            {d.quotations?.customers?.company_name && (
+                              <span className="text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full truncate max-w-[100px]">{d.quotations.customers.company_name}</span>
+                            )}
+                            <StatusBadge status={d.status}/>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-2 text-[11px] text-gray-500">
+                            <span>🇰🇼 Kuwait</span>
+                            <span className="text-gray-300">→</span>
+                            <span className="text-gray-700 font-medium truncate">🏢 {d.destination}</span>
+                          </div>
+                        </div>
+                        {/* Right image */}
+                        <EquipmentImage
+                          typeId={type?.type_id}
+                          imageUrl={type?.image_url}
+                          typeName={type?.name}
+                          contain
+                          className="h-16 w-28 rounded-xl bg-gray-100 shrink-0"/>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
+        </div>
+
+        {/* Right: Detail panel */}
+        <div className="lg:col-span-3 card overflow-hidden flex flex-col" style={{ minHeight: '460px' }}>
+          {!sel ? (
+            <div className="flex flex-col items-center justify-center h-full py-16">
+              <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
+                <Package size={28} className="text-gray-300"/>
+              </div>
+              <p className="text-sm font-medium text-gray-400">Select a dispatch to view details</p>
+              <p className="text-xs text-gray-300 mt-1">Click any dispatch on the left</p>
+            </div>
+          ) : (
+            <>
+              {/* Panel header */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900 text-sm">Dispatch Details</span>
+                  <span className={clsx('w-2 h-2 rounded-full',
+                    sel.status === 'In Transit' ? 'bg-blue-500' :
+                    sel.status === 'Assigned'   ? 'bg-blue-400' :
+                    sel.status === 'Pending'    ? 'bg-orange-400' :
+                    sel.status === 'Completed'  ? 'bg-green-500' : 'bg-gray-400'
+                  )}/>
+                  <span className={clsx('text-sm font-medium',
+                    sel.status === 'In Transit' ? 'text-blue-600' :
+                    sel.status === 'Assigned'   ? 'text-blue-500' :
+                    sel.status === 'Pending'    ? 'text-orange-500' :
+                    sel.status === 'Completed'  ? 'text-green-600' : 'text-gray-500'
+                  )}>{sel.status}</span>
+                </div>
+                <button type="button" onClick={() => setSelectedDispatchId(null)}
+                  className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+                  <X size={15}/>
+                </button>
+              </div>
+
+              {/* Equipment image */}
+              <div className="relative h-44 bg-gray-900 overflow-hidden shrink-0">
+                <EquipmentImage
+                  typeId={selEq?.typeId}
+                  imageUrl={selEq?.imageUrl}
+                  typeName={selEq?.typeName}
+                  contain
+                  className="w-full h-full rounded-none"/>
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-4 py-3">
+                  <p className="text-white font-bold text-base leading-tight">
+                    {selEq?.typeName || 'Equipment'}{selEq?.capacity ? ` · ${selEq.capacity}` : ''}
+                  </p>
+                  {selEq?.serial && <p className="text-white/60 text-xs font-mono mt-0.5">{selEq.serial}</p>}
+                </div>
+              </div>
+
+              {/* Info strip — Driver | Tracking | Equipment | Destination */}
+              <div className="flex items-start gap-0 border-b border-gray-100 shrink-0 divide-x divide-gray-100">
+                {/* Driver */}
+                <div className="flex-1 px-4 py-3 min-w-0">
+                  <p className="text-[11px] text-gray-400 mb-1.5">Driver</p>
+                  {sel.driver_name ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                        <User size={13} className="text-blue-500"/>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-800 truncate">{sel.driver_name}</p>
+                        {sel.vehicle_plate && <p className="text-[11px] text-gray-400 truncate">{sel.vehicle_plate}</p>}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 italic">Unassigned</p>
+                  )}
+                </div>
+                {/* Tracking number */}
+                <div className="flex-1 px-4 py-3 min-w-0">
+                  <p className="text-[11px] text-gray-400 mb-1.5">Tracking number</p>
+                  <p className="text-xs font-mono font-semibold text-gray-800 truncate">{sel.dispatch_id}</p>
+                  {sel.quotation_id && (
+                    <button type="button" onClick={() => setPreviewQuote(sel.quotations)}
+                      className="text-[11px] text-blue-500 hover:underline flex items-center gap-0.5 mt-0.5">
+                      <Eye size={9}/> {sel.quotation_id}
+                    </button>
+                  )}
+                </div>
+                {/* Equipment type */}
+                <div className="flex-1 px-4 py-3 min-w-0">
+                  <p className="text-[11px] text-gray-400 mb-1.5">Equipment</p>
+                  <p className="text-sm font-semibold text-gray-800 truncate">{selEq?.typeName ?? '—'}</p>
+                  {selEq?.capacity && <p className="text-[11px] text-gray-400">{selEq.capacity}</p>}
+                </div>
+                {/* Destination */}
+                <div className="flex-1 px-4 py-3 min-w-0">
+                  <p className="text-[11px] text-gray-400 mb-1.5">Destination</p>
+                  <p className="text-sm font-semibold text-gray-800 truncate flex items-center gap-1">
+                    <MapPin size={11} className="text-gray-400 shrink-0"/>{sel.destination}
+                  </p>
+                  {sel.quotations?.customers?.company_name && (
+                    <p className="text-[11px] text-gray-400 truncate mt-0.5">{sel.quotations.customers.company_name}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Date timeline */}
+              <div className="px-5 py-3 border-b border-gray-100 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="text-center shrink-0">
+                    <p className="text-[11px] text-gray-400 mb-1">{sel.dispatch_date ? format(new Date(sel.dispatch_date), 'MMM d, yyyy') : '—'}</p>
+                    <div className="w-3 h-3 rounded-full bg-blue-500 mx-auto"/>
+                  </div>
+                  <div className="flex-1 relative h-1 bg-gray-100 rounded-full overflow-hidden">
+                    {(sel.dispatch_items?.length ?? 0) > 0 && (
+                      <div className="absolute inset-y-0 left-0 rounded-full bg-blue-400 transition-all"
+                        style={{ width: `${Math.max(
+                          ((sel.dispatch_items.filter(i => i.dispatch_status !== 'Pending').length) / sel.dispatch_items.length) * 100,
+                          sel.status === 'Completed' || sel.status === 'Returned' ? 100 : 0
+                        )}%` }}/>
+                    )}
+                  </div>
+                  <div className="text-center shrink-0">
+                    <p className="text-[11px] text-gray-400 mb-1">{sel.return_date ? format(new Date(sel.return_date), 'MMM d, yyyy') : '—'}</p>
+                    <div className={clsx('w-3 h-3 rounded-full mx-auto',
+                      sel.status === 'Completed' || sel.status === 'Returned' ? 'bg-green-500' : 'bg-gray-200')}/>
+                  </div>
+                </div>
+                {(sel.dispatch_items?.length ?? 0) > 0 && (
+                  <p className="text-[11px] text-gray-400 mt-2 text-center">
+                    {sel.dispatch_items.filter(i => i.dispatch_status === 'Returned').length} returned ·{' '}
+                    {sel.dispatch_items.filter(i => i.dispatch_status === 'Dispatched').length} in transit ·{' '}
+                    {sel.dispatch_items.filter(i => i.dispatch_status === 'Pending').length} pending
+                  </p>
+                )}
+              </div>
+
+              {/* Action buttons + notes */}
+              <div className="px-5 py-3 flex-1 flex flex-col justify-between gap-3">
+                {sel.notes && (
+                  <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2">
+                    <span className="font-medium">Notes:</span> {sel.notes}
+                  </p>
+                )}
+                {canWrite && (
+                  <div className="flex gap-2 flex-wrap">
+                    {sel.status === 'Pending' && (
+                      <button
+                        onClick={() => { setAssignTarget(sel); setAssignForm({ driver_name: sel.driver_name??'', vehicle_type: sel.vehicle_type??'', vehicle_plate: sel.vehicle_plate??'', notes: sel.notes??'' }); }}
+                        className="btn-primary flex items-center gap-1.5 text-sm">
+                        <User size={13}/> Assign Driver
+                      </button>
+                    )}
+                    {['Assigned','In Transit'].includes(sel.status) && selPendingItems.length > 0 && (
+                      <button onClick={() => openDispatchItems(sel)}
+                        className="flex items-center gap-1.5 text-sm bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:bg-blue-600 transition-colors">
+                        <SendHorizonal size={13}/> Dispatch Items
+                      </button>
+                    )}
+                    {['Assigned','In Transit','Completed'].includes(sel.status) && selDispatchedItems.length > 0 && (
+                      <button onClick={() => openReturnItems(sel)}
+                        className="flex items-center gap-1.5 text-sm bg-green-500 text-white px-3 py-1.5 rounded-lg hover:bg-green-600 transition-colors">
+                        <RotateCcw size={13}/> Return Items
+                      </button>
+                    )}
+                    {!['Cancelled','Returned'].includes(sel.status) && (
+                      <button onClick={() => { setCancelTarget(sel); setCancelReason(''); }}
+                        className="flex items-center gap-1.5 text-sm bg-red-50 text-red-500 border border-red-100 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors">
+                        <XCircle size={13}/> Cancel
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Track Order */}
+      <div className="card overflow-hidden">
+        <div className="p-4 border-b border-gray-100 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+              Track Order
+              <span className="text-xs font-normal text-gray-400">({filtered.length})</span>
+            </h3>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+              {STATUSES.map(s => (
+                <button key={s} onClick={() => setStatusFilter(s)}
+                  className={clsx('px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
+                    statusFilter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+              <input className="input pl-9 text-sm"
+                placeholder="Search dispatch ID, customer, driver, destination…"
+                value={search} onChange={e => setSearch(e.target.value)}/>
+              {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><X size={13}/></button>}
+            </div>
+            <button onClick={() => setShowFilters(v => !v)}
+              className={clsx('btn-secondary flex items-center gap-1.5 text-sm', hasActiveFilters && 'ring-2 ring-primary-300')}>
+              <Filter size={14}/> Filters
+            </button>
+          </div>
+
+          {showFilters && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-gray-100">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Driver</label>
+                <input className="input text-sm" placeholder="Filter…" value={driverSearch} onChange={e => setDriverSearch(e.target.value)}/>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Destination</label>
+                <input className="input text-sm" placeholder="Filter…" value={destSearch} onChange={e => setDestSearch(e.target.value)}/>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From Date</label>
+                <input type="date" className="input text-sm" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To Date</label>
+                <input type="date" className="input text-sm" value={dateTo} onChange={e => setDateTo(e.target.value)}/>
+              </div>
+              {hasActiveFilters && (
+                <div className="col-span-2 sm:col-span-4 flex justify-end">
+                  <button onClick={() => { setDateFrom(''); setDateTo(''); setDriverSearch(''); setDestSearch(''); }}
+                    className="text-xs text-red-400 hover:underline">Clear filters</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState message="No dispatches found" icon={Truck}/>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
+                    {canWrite && (
+                      <th className="w-10 px-3 py-3">
+                        {filteredPendingIds.length > 0 && (
+                          <button type="button" onClick={toggleSelectAll}
+                            className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center',
+                              allPendingSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300')}>
+                            {allPendingSelected && <Check size={12} className="text-white"/>}
+                          </button>
+                        )}
+                      </th>
+                    )}
+                    <th className="w-8 px-3 py-3"></th>
+                    <th className="text-left px-4 py-3">ID / Quote</th>
+                    <th className="text-left px-4 py-3">Customer</th>
+                    <th className="text-left px-4 py-3">Equipment</th>
+                    <th className="text-left px-4 py-3">Driver</th>
+                    <th className="text-left px-4 py-3">Destination</th>
+                    <th className="text-left px-4 py-3">Dates</th>
+                    <th className="text-left px-4 py-3">Progress</th>
+                    <th className="text-left px-4 py-3">Status</th>
+                    {canWrite && <th className="text-left px-4 py-3">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filtered.map(d => {
+                    const pendingItems    = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
+                    const dispatchedItems = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
+                    const returnedItems   = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Returned');
+                    const totalItems      = d.dispatch_items?.length ?? 0;
+                    const isExpanded      = expandedId === d.dispatch_id;
+                    const primaryType     = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
+                    const primaryUnit     = d.dispatch_items?.[0]?.equipment_units;
+
+                    return (
+                      <React.Fragment key={d.dispatch_id}>
+                        <tr
+                          className={clsx('transition-colors cursor-pointer',
+                            selectedDispatchIds.has(d.dispatch_id) ? 'bg-primary-50 hover:bg-primary-50' : 'hover:bg-gray-50')}
+                          onClick={() => setExpandedId(isExpanded ? null : d.dispatch_id)}>
+                          {canWrite && (
+                            <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                              {d.status === 'Pending' && (
+                                <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
+                                  className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center',
+                                    selectedDispatchIds.has(d.dispatch_id) ? 'border-primary-500 bg-primary-500' : 'border-gray-300 hover:border-primary-400')}>
+                                  {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
+                                </button>
+                              )}
+                            </td>
+                          )}
+                          <td className="px-3 py-3 text-gray-400">
+                            {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="font-mono text-xs text-gray-400">{d.dispatch_id}</p>
+                            {d.quotation_id && (
+                              <button type="button"
+                                onClick={e => { e.stopPropagation(); setPreviewQuote(d.quotations); }}
+                                className="flex items-center gap-1 text-xs text-primary-500 hover:underline">
+                                <Eye size={10}/> {d.quotation_id}
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-sm text-gray-800">{d.quotations?.customers?.company_name ?? <span className="text-gray-400 italic text-xs">Manual</span>}</p>
+                            {d.quotationApprover && <p className="text-xs text-green-600">{d.quotationApprover.name}</p>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <EquipmentImage
+                                typeId={primaryType?.type_id}
+                                imageUrl={primaryType?.image_url}
+                                typeName={primaryType?.name}
+                                className="w-9 h-9 rounded-lg shrink-0"/>
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium text-gray-700 truncate">{primaryType?.name ?? '—'}</p>
+                                <p className="text-xs text-gray-400 font-mono truncate">{primaryUnit?.serial_number ?? '—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{d.driver_name || <span className="text-gray-300 text-xs">Unassigned</span>}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600 max-w-[120px] truncate">{d.destination}</td>
+                          <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
+                            <div>{d.dispatch_date ? format(new Date(d.dispatch_date),'dd MMM yy') : '—'}</div>
+                            {d.return_date && <div className="text-gray-300">→ {format(new Date(d.return_date),'dd MMM yy')}</div>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {totalItems > 0 ? (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                    <div className="flex h-full overflow-hidden">
+                                      <div className="bg-green-400" style={{ width: `${(returnedItems.length / totalItems) * 100}%` }}/>
+                                      <div className="bg-blue-400" style={{ width: `${(dispatchedItems.length / totalItems) * 100}%` }}/>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs text-gray-500">{returnedItems.length}↩ {dispatchedItems.length}→ {pendingItems.length}⏳</span>
+                                </div>
+                              </div>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-4 py-3"><StatusBadge status={d.status}/></td>
+                          {canWrite && (
+                            <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {d.status === 'Pending' && (
+                                  <button
+                                    onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
+                                    className="text-xs bg-primary-500 text-white px-2 py-1 rounded-lg whitespace-nowrap">
+                                    Assign
+                                  </button>
+                                )}
+                                {['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
+                                  <button onClick={() => openDispatchItems(d)}
+                                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg flex items-center gap-0.5 whitespace-nowrap">
+                                    <SendHorizonal size={10}/> Dispatch
+                                  </button>
+                                )}
+                                {['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
+                                  <button onClick={() => openReturnItems(d)}
+                                    className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-0.5 whitespace-nowrap">
+                                    <RotateCcw size={10}/> Return
+                                  </button>
+                                )}
+                                {!['Cancelled','Returned'].includes(d.status) && (
+                                  <button onClick={() => { setCancelTarget(d); setCancelReason(''); }}
+                                    className="text-gray-300 hover:text-red-500 transition-colors p-1">
+                                    <XCircle size={13}/>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+
+                        {/* Expanded row */}
+                        {isExpanded && (
+                          <tr className="bg-gray-50/80">
+                            <td colSpan={canWrite ? 11 : 9} className="px-6 py-4">
+                              <div className="space-y-3">
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                  Equipment Items ({totalItems})
+                                </p>
+                                {(d.dispatch_items ?? []).map(item => (
+                                  <div key={item.item_id}
+                                    className={clsx('flex items-center justify-between p-3 rounded-xl border text-sm',
+                                      item.dispatch_status === 'Returned'   ? 'bg-green-50 border-green-100' :
+                                      item.dispatch_status === 'Dispatched' ? 'bg-blue-50 border-blue-100' :
+                                      'bg-white border-gray-100')}>
+                                    <div className="flex items-center gap-3">
+                                      <div className={clsx('w-2.5 h-2.5 rounded-full shrink-0',
+                                        item.dispatch_status === 'Returned'   ? 'bg-green-400' :
+                                        item.dispatch_status === 'Dispatched' ? 'bg-blue-400' : 'bg-yellow-400')}/>
+                                      <div>
+                                        <p className="font-medium text-gray-800">
+                                          {item.equipment_units?.equipment_types?.name} {item.equipment_units?.capacity}
+                                        </p>
+                                        <p className="text-xs text-gray-400">
+                                          {item.equipment_id} · {item.equipment_units?.serial_number ?? '—'} · {item.equipment_units?.location ?? '—'}
+                                        </p>
+                                        {item.dispatched_at && (
+                                          <p className="text-xs text-blue-500">Dispatched: {format(new Date(item.dispatched_at), 'dd MMM yyyy HH:mm')}</p>
+                                        )}
+                                        {item.returned_at && (
+                                          <p className="text-xs text-green-600">Returned: {format(new Date(item.returned_at), 'dd MMM yyyy HH:mm')}</p>
+                                        )}
+                                        {item.extended_return_date && (
+                                          <p className="text-xs text-orange-600 flex items-center gap-1">
+                                            <Calendar size={10}/> Extended: {format(new Date(item.extended_return_date), 'dd MMM yyyy')}
+                                          </p>
+                                        )}
+                                        {item.return_notes && <p className="text-xs text-gray-500 italic">{item.return_notes}</p>}
+                                      </div>
+                                    </div>
+                                    <span className={clsx('px-2 py-1 rounded-lg text-xs font-medium border', STATUS_COLORS[item.dispatch_status] ?? 'bg-gray-50 text-gray-600 border-gray-100')}>
+                                      {item.dispatch_status}
+                                    </span>
+                                  </div>
+                                ))}
+
+                                {d.status === 'Cancelled' && (
+                                  <div className="space-y-1">
+                                    {d.cancelledByUser && (
+                                      <div className="bg-red-50 rounded-lg px-3 py-2 text-xs">
+                                        <p className="text-red-400">Cancelled by: <span className="font-medium text-red-700">{d.cancelledByUser.name}</span></p>
+                                        {d.cancelled_at && <p className="text-red-300">{format(new Date(d.cancelled_at), 'dd MMM yyyy HH:mm')}</p>}
+                                      </div>
+                                    )}
+                                    {d.cancel_reason && (
+                                      <div className="bg-red-50 rounded-lg px-3 py-2 text-xs">
+                                        <p className="text-red-400">Reason: <span className="font-medium text-red-700">{d.cancel_reason}</span></p>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {editingNotesId === d.dispatch_id ? (
+                                  <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-2">
+                                    <textarea className="input text-xs resize-y w-full" rows={2}
+                                      value={notesEditValue}
+                                      onChange={e => setNotesEditValue(e.target.value)}
+                                      placeholder="Add dispatch notes…"
+                                      autoFocus/>
+                                    <div className="flex gap-2">
+                                      <button onClick={() => saveNotes(d.dispatch_id)} disabled={savingNotes}
+                                        className="text-xs bg-primary-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50">
+                                        {savingNotes ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>} Save
+                                      </button>
+                                      <button onClick={() => setEditingNotesId(null)}
+                                        className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancel</button>
+                                    </div>
+                                  </div>
+                                ) : d.notes ? (
+                                  <div className="bg-yellow-50 rounded-lg px-3 py-2 text-xs text-yellow-700 flex items-start justify-between gap-2">
+                                    <span><span className="font-medium">Notes:</span> {d.notes}</span>
+                                    {canWrite && !['Cancelled'].includes(d.status) && (
+                                      <button type="button"
+                                        onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(d.notes ?? ''); }}
+                                        className="shrink-0 text-yellow-500 hover:text-yellow-700 p-0.5">
+                                        <Pencil size={11}/>
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : canWrite && !['Cancelled','Returned'].includes(d.status) ? (
+                                  <button type="button"
+                                    onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(''); }}
+                                    className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                                    <Pencil size={11}/> Add notes
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-gray-50">
+              {filtered.map(d => {
+                const pendingItems    = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
+                const dispatchedItems = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
+                const returnedItems   = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Returned');
+                const totalItems      = d.dispatch_items?.length ?? 0;
+                const primaryType     = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
+
+                return (
+                  <div key={d.dispatch_id} className={clsx('p-4', selectedDispatchIds.has(d.dispatch_id) && 'bg-primary-50/30')}>
+                    <div className="flex gap-3">
+                      <EquipmentImage
+                        typeId={primaryType?.type_id}
+                        imageUrl={primaryType?.image_url}
+                        typeName={primaryType?.name}
+                        className="w-14 h-14 rounded-xl shrink-0"/>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <p className="font-mono text-xs text-gray-400">{d.dispatch_id}</p>
+                          <StatusBadge status={d.status}/>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-800 truncate">
+                          {d.quotations?.customers?.company_name ?? 'Manual Dispatch'}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate flex items-center gap-1">
+                          <MapPin size={10} className="shrink-0"/> {d.destination}
+                        </p>
+                        {d.driver_name && <p className="text-xs text-gray-400 mt-0.5">Driver: {d.driver_name}</p>}
+                        {totalItems > 0 && (
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                              <div className="flex h-full overflow-hidden">
+                                <div className="bg-green-400" style={{ width: `${(returnedItems.length / totalItems) * 100}%` }}/>
+                                <div className="bg-blue-400" style={{ width: `${(dispatchedItems.length / totalItems) * 100}%` }}/>
+                              </div>
+                            </div>
+                            <span className="text-xs text-gray-400">{returnedItems.length}↩ {dispatchedItems.length}→ {pendingItems.length}⏳</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      {canWrite && d.status === 'Pending' && (
+                        <button onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
+                          className="text-xs bg-primary-500 text-white px-3 py-1.5 rounded-lg">Assign Driver</button>
+                      )}
+                      {canWrite && ['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
+                        <button onClick={() => openDispatchItems(d)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg">Dispatch Items</button>
+                      )}
+                      {canWrite && ['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
+                        <button onClick={() => openReturnItems(d)} className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg">Return Items</button>
+                      )}
+                      {canWrite && !['Cancelled','Returned'].includes(d.status) && (
+                        <button onClick={() => { setCancelTarget(d); setCancelReason(''); }}
+                          className="text-xs bg-red-50 text-red-500 px-3 py-1.5 rounded-lg border border-red-100">Cancel</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Dispatch list */}
-      {filtered.length === 0 ? (
-        <EmptyState message="No dispatches found" icon={Truck}/>
-      ) : (
-        <>
-          {/* Desktop */}
-          <div className="card hidden md:block overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase">
-                  {canWrite && (
-                    <th className="w-10 px-3 py-3">
-                      {filteredPendingIds.length > 0 && (
-                        <button type="button" onClick={toggleSelectAll}
-                          className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center transition-all',
-                            allPendingSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300 hover:border-primary-400')}>
-                          {allPendingSelected && <Check size={12} className="text-white"/>}
-                        </button>
-                      )}
-                    </th>
-                  )}
-                  <th className="w-8 px-3 py-3"></th>
-                  <th className="text-left px-4 py-3">ID</th>
-                  <th className="text-left px-4 py-3">Quotation / Customer</th>
-                  <th className="text-left px-4 py-3">Approved By</th>
-                  <th className="text-left px-4 py-3">Items Progress</th>
-                  <th className="text-left px-4 py-3">Driver</th>
-                  <th className="text-left px-4 py-3">Destination</th>
-                  <th className="text-left px-4 py-3">Dispatch</th>
-                  <th className="text-left px-4 py-3">Return</th>
-                  <th className="text-left px-4 py-3">Status</th>
-                  {canWrite && <th className="text-left px-4 py-3">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map(d => {
-                  const pendingItems    = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
-                  const dispatchedItems = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
-                  const returnedItems   = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Returned');
-                  const totalItems      = d.dispatch_items?.length ?? 0;
-                  const isExpanded      = expandedId === d.dispatch_id;
-
-                  return (
-                    <React.Fragment key={d.dispatch_id}>
-                      <tr
-                        className={clsx('transition-colors cursor-pointer',
-                          selectedDispatchIds.has(d.dispatch_id) ? 'bg-primary-50 hover:bg-primary-50' : 'hover:bg-gray-50')}
-                        style={{ animation: 'dmRowFadeIn 0.25s ease both' }}
-                        onClick={() => setExpandedId(isExpanded ? null : d.dispatch_id)}>
-                        {canWrite && (
-                          <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-                            {d.status === 'Pending' && (
-                              <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
-                                className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-150',
-                                  selectedDispatchIds.has(d.dispatch_id)
-                                    ? 'border-primary-500 bg-primary-500 scale-110' : 'border-gray-300 hover:border-primary-400')}>
-                                {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
-                              </button>
-                            )}
-                          </td>
-                        )}
-                        <td className="px-3 py-3 text-gray-400">
-                          {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-400">{d.dispatch_id}</td>
-                        <td className="px-4 py-3">
-                          {d.quotation_id ? (
-                            <div>
-                              <button type="button"
-                                onClick={e => { e.stopPropagation(); setPreviewQuote(d.quotations); }}
-                                className="flex items-center gap-1 text-xs text-primary-600 hover:underline font-mono">
-                                <Eye size={11}/> {d.quotation_id}
-                              </button>
-                              <p className="text-xs text-gray-500">{d.quotations?.customers?.company_name}</p>
-                            </div>
-                          ) : <span className="text-gray-300 text-xs">Manual</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {d.quotationApprover ? (
-                            <div>
-                              <p className="text-xs font-medium text-green-700">{d.quotationApprover.name}</p>
-                              <p className="text-xs text-gray-400">{d.quotationApprover.role}</p>
-                            </div>
-                          ) : <span className="text-gray-300 text-xs">—</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {totalItems > 0 ? (
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 text-xs">
-                                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
-                                  <div className="flex h-full rounded-full overflow-hidden">
-                                    <div className="bg-green-400" style={{ width: `${(returnedItems.length / totalItems) * 100}%` }}/>
-                                    <div className="bg-blue-400" style={{ width: `${(dispatchedItems.length / totalItems) * 100}%` }}/>
-                                  </div>
-                                </div>
-                                <span className="text-gray-500 whitespace-nowrap">
-                                  {returnedItems.length}↩ {dispatchedItems.length}→ {pendingItems.length}⏳
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-400">{totalItems} total</p>
-                            </div>
-                          ) : <span className="text-gray-300 text-xs">—</span>}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600 text-sm">{d.driver_name || '—'}</td>
-                        <td className="px-4 py-3 text-gray-600 text-sm max-w-[120px] truncate">{d.destination}</td>
-                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
-                          {d.dispatch_date ? format(new Date(d.dispatch_date),'dd MMM yyyy') : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
-                          {d.return_date ? format(new Date(d.return_date),'dd MMM yyyy') : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <StatusBadge status={d.status}/>
-                            {d.dispatch_type === 'Partial' && (
-                              <span className="text-xs bg-orange-50 text-orange-600 border border-orange-100 px-1.5 py-0.5 rounded font-medium">Partial</span>
-                            )}
-                          </div>
-                        </td>
-                        {canWrite && (
-                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1 flex-wrap">
-                              {/* Pending → Assign Driver */}
-                              {d.status === 'Pending' && (
-                                <button
-                                  onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
-                                  className="text-xs bg-primary-500 text-white px-2 py-1 rounded-lg whitespace-nowrap">
-                                  Assign Driver
-                                </button>
-                              )}
-
-                              {/* Assigned → Dispatch Items */}
-                              {['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
-                                <button onClick={() => openDispatchItems(d)}
-                                  className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap">
-                                  <SendHorizonal size={11}/> Dispatch Items
-                                </button>
-                              )}
-
-                              {/* Return Items */}
-                              {['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
-                                <button onClick={() => openReturnItems(d)}
-                                  className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1 whitespace-nowrap">
-                                  <RotateCcw size={11}/> Return Items
-                                </button>
-                              )}
-
-                              {/* Cancel */}
-                              {!['Cancelled','Returned'].includes(d.status) && (
-                                <button onClick={() => { setCancelTarget(d); setCancelReason(''); }}
-                                  className="text-gray-300 hover:text-red-500 transition-colors p-1">
-                                  <XCircle size={14}/>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-
-                      {/* Expanded row — item-level detail */}
-                      {isExpanded && (
-                        <tr className="bg-gray-50/80" style={{ animation: 'dmSlideDown 0.2s ease' }}>
-                          <td colSpan={canWrite ? 12 : 10} className="px-6 py-4">
-                            <div className="space-y-3">
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                                Equipment Items ({totalItems})
-                              </p>
-
-                              {(d.dispatch_items ?? []).map(item => (
-                                <div key={item.item_id}
-                                  className={clsx('flex items-center justify-between p-3 rounded-xl border text-sm',
-                                    item.dispatch_status === 'Returned'   ? 'bg-green-50 border-green-100' :
-                                    item.dispatch_status === 'Dispatched' ? 'bg-blue-50 border-blue-100' :
-                                    'bg-white border-gray-100')}>
-                                  <div className="flex items-center gap-3">
-                                    <div className={clsx('w-2.5 h-2.5 rounded-full shrink-0',
-                                      item.dispatch_status === 'Returned'   ? 'bg-green-400' :
-                                      item.dispatch_status === 'Dispatched' ? 'bg-blue-400' : 'bg-yellow-400')}>
-                                    </div>
-                                    <div>
-                                      <p className="font-medium text-gray-800">
-                                        {item.equipment_units?.equipment_types?.name} {item.equipment_units?.capacity}
-                                      </p>
-                                      <p className="text-xs text-gray-400">
-                                        {item.equipment_id} · {item.equipment_units?.serial_number ?? '—'} · {item.equipment_units?.location ?? '—'}
-                                      </p>
-                                      {item.dispatched_at && (
-                                        <p className="text-xs text-blue-500">Dispatched: {format(new Date(item.dispatched_at), 'dd MMM yyyy HH:mm')}</p>
-                                      )}
-                                      {item.returned_at && (
-                                        <p className="text-xs text-green-600">Returned: {format(new Date(item.returned_at), 'dd MMM yyyy HH:mm')}</p>
-                                      )}
-                                      {item.extended_return_date && (
-                                        <p className="text-xs text-orange-600 flex items-center gap-1">
-                                          <Calendar size={10}/> Extended return: {format(new Date(item.extended_return_date), 'dd MMM yyyy')}
-                                        </p>
-                                      )}
-                                      {item.return_notes && <p className="text-xs text-gray-500 italic">{item.return_notes}</p>}
-                                    </div>
-                                  </div>
-                                  <span className={clsx('px-2 py-1 rounded-lg text-xs font-medium border', STATUS_COLORS[item.dispatch_status] ?? 'bg-gray-50 text-gray-600 border-gray-100')}>
-                                    {item.dispatch_status}
-                                  </span>
-                                </div>
-                              ))}
-
-                              {/* Cancellation info */}
-                              {d.status === 'Cancelled' && (
-                                <div className="mt-2 space-y-1">
-                                  {d.cancelledByUser && (
-                                    <div className="bg-red-50 rounded-lg px-3 py-2 text-xs">
-                                      <p className="text-red-400">Cancelled by: <span className="font-medium text-red-700">{d.cancelledByUser.name}</span></p>
-                                      {d.cancelled_at && <p className="text-red-300">{format(new Date(d.cancelled_at), 'dd MMM yyyy HH:mm')}</p>}
-                                    </div>
-                                  )}
-                                  {d.cancel_reason && (
-                                    <div className="bg-red-50 rounded-lg px-3 py-2 text-xs">
-                                      <p className="text-red-400">Reason: <span className="font-medium text-red-700">{d.cancel_reason}</span></p>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Inline notes editor */}
-                              {editingNotesId === d.dispatch_id ? (
-                                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-2"
-                                  style={{ animation: 'dmPopIn 0.18s ease' }}>
-                                  <p className="text-xs font-medium text-yellow-700">Edit Notes</p>
-                                  <textarea className="input text-xs resize-y w-full" rows={2}
-                                    value={notesEditValue}
-                                    onChange={e => setNotesEditValue(e.target.value)}
-                                    placeholder="Add dispatch notes…"
-                                    autoFocus/>
-                                  <div className="flex gap-2">
-                                    <button onClick={() => saveNotes(d.dispatch_id)} disabled={savingNotes}
-                                      className="text-xs bg-primary-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50">
-                                      {savingNotes ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>} Save
-                                    </button>
-                                    <button onClick={() => setEditingNotesId(null)}
-                                      className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">Cancel</button>
-                                  </div>
-                                </div>
-                              ) : d.notes ? (
-                                <div className="bg-yellow-50 rounded-lg px-3 py-2 text-xs text-yellow-700 flex items-start justify-between gap-2">
-                                  <span><span className="font-medium">Notes:</span> {d.notes}</span>
-                                  {canWrite && !['Cancelled'].includes(d.status) && (
-                                    <button type="button"
-                                      onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(d.notes ?? ''); }}
-                                      className="shrink-0 text-yellow-500 hover:text-yellow-700 p-0.5 transition-colors">
-                                      <Pencil size={11}/>
-                                    </button>
-                                  )}
-                                </div>
-                              ) : canWrite && !['Cancelled','Returned'].includes(d.status) ? (
-                                <button type="button"
-                                  onClick={() => { setEditingNotesId(d.dispatch_id); setNotesEditValue(''); }}
-                                  className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
-                                  <Pencil size={11}/> Add notes
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile */}
-          <div className="md:hidden space-y-3">
-            {filtered.map(d => {
-              const pendingItems    = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending');
-              const dispatchedItems = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Dispatched');
-              const returnedItems   = (d.dispatch_items ?? []).filter(i => i.dispatch_status === 'Returned');
-              const totalItems      = d.dispatch_items?.length ?? 0;
-
-              return (
-                <div key={d.dispatch_id}
-                  className={clsx('card p-4 transition-colors', selectedDispatchIds.has(d.dispatch_id) && 'ring-2 ring-primary-300 bg-primary-50/30')}
-                  style={{ animation: 'dmRowFadeIn 0.25s ease both' }}>
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-start gap-2">
-                      {canWrite && d.status === 'Pending' && (
-                        <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
-                          className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center mt-0.5 shrink-0 transition-all',
-                            selectedDispatchIds.has(d.dispatch_id) ? 'border-primary-500 bg-primary-500' : 'border-gray-300')}>
-                          {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
-                        </button>
-                      )}
-                      <div>
-                        <p className="font-mono text-xs text-gray-400">{d.dispatch_id}</p>
-                        {d.quotation_id && (
-                          <button onClick={() => setPreviewQuote(d.quotations)}
-                            className="text-xs text-primary-600 hover:underline flex items-center gap-1">
-                            <Eye size={11}/> {d.quotation_id}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <StatusBadge status={d.status}/>
-                      {d.dispatch_type === 'Partial' && (
-                        <span className="text-xs bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded">Partial</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {d.quotations?.customers && (
-                    <p className="text-sm font-medium text-gray-700">{d.quotations.customers.company_name}</p>
-                  )}
-                  <p className="text-sm text-gray-600">→ {d.destination}</p>
-
-                  {totalItems > 0 && (
-                    <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
-                      <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="flex h-full rounded-full overflow-hidden">
-                          <div className="bg-green-400" style={{ width: `${(returnedItems.length / totalItems) * 100}%` }}/>
-                          <div className="bg-blue-400" style={{ width: `${(dispatchedItems.length / totalItems) * 100}%` }}/>
-                        </div>
-                      </div>
-                      <span>{returnedItems.length}↩ {dispatchedItems.length}→ {pendingItems.length}⏳ / {totalItems}</span>
-                    </div>
-                  )}
-
-                  {d.driver_name && <p className="text-xs text-gray-400 mt-1">Driver: {d.driver_name}</p>}
-
-                  <div className="flex gap-2 mt-3 flex-wrap">
-                    {canWrite && d.status === 'Pending' && (
-                      <button onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
-                        className="text-xs bg-primary-500 text-white px-3 py-1.5 rounded-lg">Assign Driver</button>
-                    )}
-                    {canWrite && ['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
-                      <button onClick={() => openDispatchItems(d)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg">Dispatch Items</button>
-                    )}
-                    {canWrite && ['Assigned','In Transit','Completed'].includes(d.status) && dispatchedItems.length > 0 && (
-                      <button onClick={() => openReturnItems(d)} className="text-xs bg-green-500 text-white px-3 py-1.5 rounded-lg">Return Items</button>
-                    )}
-                    {canWrite && !['Cancelled','Returned'].includes(d.status) && (
-                      <button onClick={() => { setCancelTarget(d); setCancelReason(''); }}
-                        className="text-xs bg-red-50 text-red-500 px-3 py-1.5 rounded-lg border border-red-100">Cancel</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* ── Floating Bulk Action Bar ── */}
+      {/* Floating Bulk Action Bar */}
       {selectedDispatchIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900 text-white pl-4 pr-3 py-3 rounded-2xl shadow-2xl"
           style={{ animation: 'dmBulkBarSlide 0.28s cubic-bezier(0.34,1.56,0.64,1)' }}>
@@ -1119,7 +1337,7 @@ export default function DispatchManagePage() {
           </div>
           <div className="w-px h-5 bg-white/20"/>
           <button onClick={() => setShowBulkAssign(true)}
-            className="flex items-center gap-1.5 text-sm bg-primary-500 hover:bg-primary-400 active:bg-primary-600 px-3 py-1.5 rounded-xl font-medium transition-colors">
+            className="flex items-center gap-1.5 text-sm bg-primary-500 hover:bg-primary-400 px-3 py-1.5 rounded-xl font-medium transition-colors">
             <Users size={14}/> Assign to Driver
           </button>
           <button onClick={clearSelection}
@@ -1129,7 +1347,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Bulk Assign Modal ── */}
+      {/* Bulk Assign Modal */}
       {showBulkAssign && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1144,9 +1362,7 @@ export default function DispatchManagePage() {
               </div>
               <button onClick={() => setShowBulkAssign(false)} className="text-gray-400 hover:text-gray-600 p-1"><X size={18}/></button>
             </div>
-
             <div className="p-5 space-y-5">
-              {/* Shared driver fields */}
               <div className="space-y-3">
                 <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
                   <Truck size={14} className="text-gray-400"/> Driver & Vehicle <span className="text-red-500 text-xs">*</span>
@@ -1156,8 +1372,7 @@ export default function DispatchManagePage() {
                     <label className="block text-xs text-gray-500 mb-1">Driver Name *</label>
                     <input className="input" placeholder="Full name"
                       value={bulkAssignForm.driver_name}
-                      onChange={e => setBulkAssignForm(f => ({...f, driver_name: e.target.value}))}
-                      autoFocus/>
+                      onChange={e => setBulkAssignForm(f => ({...f, driver_name: e.target.value}))} autoFocus/>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
@@ -1173,8 +1388,6 @@ export default function DispatchManagePage() {
                   </div>
                 </div>
               </div>
-
-              {/* Per-dispatch notes */}
               <div className="space-y-2">
                 <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
                   <ClipboardList size={14} className="text-gray-400"/> Per-Dispatch Notes
@@ -1183,13 +1396,11 @@ export default function DispatchManagePage() {
                   {[...selectedDispatchIds].map((id, idx) => {
                     const d = dispatches.find(x => x.dispatch_id === id);
                     if (!d) return null;
-                    const eqItem = d.dispatch_items?.[0]?.equipment_units;
-                    const eqLabel = eqItem
-                      ? `${eqItem.equipment_types?.name ?? ''} ${eqItem.capacity ?? ''}`.trim()
-                      : null;
+                    const eqItem  = d.dispatch_items?.[0]?.equipment_units;
+                    const eqLabel = eqItem ? `${eqItem.equipment_types?.name ?? ''} ${eqItem.capacity ?? ''}`.trim() : null;
                     return (
                       <div key={id}
-                        className="border border-gray-100 rounded-xl p-3 space-y-2 hover:border-gray-200 transition-colors"
+                        className="border border-gray-100 rounded-xl p-3 space-y-2"
                         style={{ animation: `dmPopIn 0.2s ease ${idx * 0.04}s both` }}>
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -1203,9 +1414,7 @@ export default function DispatchManagePage() {
                           <StatusBadge status={d.status}/>
                         </div>
                         {d.notes && (
-                          <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-2 py-1.5">
-                            Existing: {d.notes}
-                          </p>
+                          <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-2 py-1.5">Existing: {d.notes}</p>
                         )}
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Notes for this dispatch</label>
@@ -1219,16 +1428,13 @@ export default function DispatchManagePage() {
                   })}
                 </div>
               </div>
-
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={() => setShowBulkAssign(false)} className="btn-secondary">Cancel</button>
                 <button onClick={handleBulkAssign}
                   disabled={bulkAssigning || !bulkAssignForm.driver_name.trim()}
                   className="btn-primary flex items-center gap-2 disabled:opacity-50">
                   {bulkAssigning && <Loader2 size={14} className="animate-spin"/>}
-                  {bulkAssigning
-                    ? `Assigning ${selectedDispatchIds.size}…`
-                    : `Assign ${selectedDispatchIds.size} Dispatch${selectedDispatchIds.size !== 1 ? 'es' : ''}`}
+                  {bulkAssigning ? `Assigning ${selectedDispatchIds.size}…` : `Assign ${selectedDispatchIds.size} Dispatch${selectedDispatchIds.size !== 1 ? 'es' : ''}`}
                 </button>
               </div>
             </div>
@@ -1236,7 +1442,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Assign Driver Modal ── */}
+      {/* Assign Driver Modal */}
       {assignTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1287,7 +1493,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Dispatch Items Modal ── */}
+      {/* Dispatch Items Modal */}
       {dispatchItemsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1302,14 +1508,11 @@ export default function DispatchManagePage() {
               </div>
               <button onClick={() => { setDispatchItemsModal(null); setSelectedItemIds([]); setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); setPerItemDrivers({}); }} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
             </div>
-
             <div className="p-5 space-y-4">
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700">
                 <p className="font-medium mb-1">Select items to dispatch now</p>
                 <p>You can dispatch a subset of items (partial dispatch). Remaining items stay Pending and can be dispatched later.</p>
               </div>
-
-              {/* Item selection */}
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-gray-700">
                   Pending Items ({(dispatchItemsModal.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending').length})
@@ -1322,77 +1525,57 @@ export default function DispatchManagePage() {
                     className="text-xs text-gray-400 hover:underline">Deselect all</button>
                 </div>
               </div>
-
               <div className="space-y-2">
-                {(dispatchItemsModal.dispatch_items ?? [])
-                  .filter(i => i.dispatch_status === 'Pending')
-                  .map(item => {
-                    const isSelected = selectedItemIds.includes(item.item_id);
-                    return (
-                      <div key={item.item_id} className="space-y-2">
-                        <button type="button"
-                          onClick={() => setSelectedItemIds(prev =>
-                            prev.includes(item.item_id) ? prev.filter(id => id !== item.item_id) : [...prev, item.item_id]
-                          )}
-                          className={clsx(
-                            'w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors',
-                            isSelected ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-100 hover:border-gray-200'
-                          )}>
-                          <div className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center shrink-0',
-                            isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300')}>
-                            {isSelected && <CheckCircle size={12} className="text-white"/>}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800">
-                              {item.equipment_units?.equipment_types?.name} {item.equipment_units?.capacity}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              {item.equipment_id} · {item.equipment_units?.serial_number ?? '—'} · {item.equipment_units?.location ?? '—'}
-                            </p>
-                          </div>
-                          <span className="text-xs font-medium text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-100">Pending</span>
-                        </button>
-
-                        {/* Per-item driver fields (only shown in per-item mode when item is selected) */}
-                        {isSelected && driverMode === 'per-item' && (
-                          <div className="ml-8 grid grid-cols-3 gap-2">
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
-                              <input className="input text-xs"
-                                placeholder="Driver name"
-                                value={perItemDrivers[item.item_id]?.driver_name ?? ''}
-                                onChange={e => setPerItemDrivers(prev => ({
-                                  ...prev,
-                                  [item.item_id]: { ...(prev[item.item_id] ?? {}), driver_name: e.target.value }
-                                }))}/>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
-                              <input className="input text-xs"
-                                placeholder="e.g. Flatbed"
-                                value={perItemDrivers[item.item_id]?.vehicle_type ?? ''}
-                                onChange={e => setPerItemDrivers(prev => ({
-                                  ...prev,
-                                  [item.item_id]: { ...(prev[item.item_id] ?? {}), vehicle_type: e.target.value }
-                                }))}/>
-                            </div>
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">Plate</label>
-                              <input className="input text-xs"
-                                placeholder="KWI 1234"
-                                value={perItemDrivers[item.item_id]?.vehicle_plate ?? ''}
-                                onChange={e => setPerItemDrivers(prev => ({
-                                  ...prev,
-                                  [item.item_id]: { ...(prev[item.item_id] ?? {}), vehicle_plate: e.target.value }
-                                }))}/>
-                            </div>
-                          </div>
+                {(dispatchItemsModal.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending').map(item => {
+                  const isSelected = selectedItemIds.includes(item.item_id);
+                  return (
+                    <div key={item.item_id} className="space-y-2">
+                      <button type="button"
+                        onClick={() => setSelectedItemIds(prev =>
+                          prev.includes(item.item_id) ? prev.filter(id => id !== item.item_id) : [...prev, item.item_id]
                         )}
-                      </div>
-                    );
-                  })}
+                        className={clsx('w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors',
+                          isSelected ? 'bg-blue-50 border-blue-200' : 'bg-gray-50 border-gray-100 hover:border-gray-200')}>
+                        <div className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center shrink-0',
+                          isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300')}>
+                          {isSelected && <CheckCircle size={12} className="text-white"/>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800">
+                            {item.equipment_units?.equipment_types?.name} {item.equipment_units?.capacity}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            {item.equipment_id} · {item.equipment_units?.serial_number ?? '—'}
+                          </p>
+                        </div>
+                        <span className="text-xs font-medium text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-100">Pending</span>
+                      </button>
+                      {isSelected && driverMode === 'per-item' && (
+                        <div className="ml-8 grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
+                            <input className="input text-xs" placeholder="Driver name"
+                              value={perItemDrivers[item.item_id]?.driver_name ?? ''}
+                              onChange={e => setPerItemDrivers(prev => ({ ...prev, [item.item_id]: { ...(prev[item.item_id] ?? {}), driver_name: e.target.value } }))}/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
+                            <input className="input text-xs" placeholder="e.g. Flatbed"
+                              value={perItemDrivers[item.item_id]?.vehicle_type ?? ''}
+                              onChange={e => setPerItemDrivers(prev => ({ ...prev, [item.item_id]: { ...(prev[item.item_id] ?? {}), vehicle_type: e.target.value } }))}/>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Plate</label>
+                            <input className="input text-xs" placeholder="KWI 1234"
+                              value={perItemDrivers[item.item_id]?.vehicle_plate ?? ''}
+                              onChange={e => setPerItemDrivers(prev => ({ ...prev, [item.item_id]: { ...(prev[item.item_id] ?? {}), vehicle_plate: e.target.value } }))}/>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-
               {selectedItemIds.length > 0 && (
                 <div className="bg-blue-50 rounded-xl p-3 text-xs text-blue-700">
                   <p className="font-medium">
@@ -1401,47 +1584,39 @@ export default function DispatchManagePage() {
                   </p>
                 </div>
               )}
-
-              {/* Driver assignment section */}
               <div className="border border-gray-100 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
                     <User size={14} className="text-gray-400"/> Driver Assignment
                   </p>
                   <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-                    <button type="button"
-                      onClick={() => setDriverMode('shared')}
+                    <button type="button" onClick={() => setDriverMode('shared')}
                       className={clsx('text-xs px-2.5 py-1 rounded-md transition-colors', driverMode === 'shared' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500')}>
                       Same Driver
                     </button>
-                    <button type="button"
-                      onClick={() => setDriverMode('per-item')}
+                    <button type="button" onClick={() => setDriverMode('per-item')}
                       className={clsx('text-xs px-2.5 py-1 rounded-md transition-colors', driverMode === 'per-item' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500')}>
                       Per Item
                     </button>
                   </div>
                 </div>
-
                 {driverMode === 'shared' && (
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
-                      <input className="input text-xs"
-                        placeholder="Full name"
+                      <input className="input text-xs" placeholder="Full name"
                         value={sharedDriver.driver_name}
                         onChange={e => setSharedDriver(f => ({...f, driver_name: e.target.value}))}/>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
-                      <input className="input text-xs"
-                        placeholder="e.g. Flatbed"
+                      <input className="input text-xs" placeholder="e.g. Flatbed"
                         value={sharedDriver.vehicle_type}
                         onChange={e => setSharedDriver(f => ({...f, vehicle_type: e.target.value}))}/>
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Vehicle Plate</label>
-                      <input className="input text-xs"
-                        placeholder="KWI 1234"
+                      <input className="input text-xs" placeholder="KWI 1234"
                         value={sharedDriver.vehicle_plate}
                         onChange={e => setSharedDriver(f => ({...f, vehicle_plate: e.target.value}))}/>
                     </div>
@@ -1451,7 +1626,6 @@ export default function DispatchManagePage() {
                   <p className="text-xs text-gray-400">Enter driver details per item above.</p>
                 )}
               </div>
-
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={() => { setDispatchItemsModal(null); setSelectedItemIds([]); setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); setPerItemDrivers({}); }} className="btn-secondary">Cancel</button>
                 <button onClick={handleDispatchItems} disabled={dispatchingItems || selectedItemIds.length === 0}
@@ -1465,7 +1639,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Return Items Modal ── */}
+      {/* Return Items Modal */}
       {returnModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1480,7 +1654,6 @@ export default function DispatchManagePage() {
               </div>
               <button onClick={() => { setReturnModal(null); setReturnSelects([]); setReturnDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); }} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
             </div>
-
             <div className="p-5 space-y-4">
               {returnModal?.notes && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800 flex items-start gap-2">
@@ -1490,13 +1663,10 @@ export default function DispatchManagePage() {
               )}
               <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-xs text-green-700">
                 <p className="font-medium mb-1">Partial return supported</p>
-                <p>Select which items are being returned now. Unselected items remain Dispatched (outstanding). You can set an extended return date for items not yet returned.</p>
+                <p>Select which items are being returned now. Unselected items remain Dispatched. You can set an extended return date for items not yet returned.</p>
               </div>
-
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-700">
-                  Dispatched Items ({returnSelects.length})
-                </p>
+                <p className="text-sm font-medium text-gray-700">Dispatched Items ({returnSelects.length})</p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setReturnSelects(rs => rs.map(r => ({...r, selected:true})))}
                     className="text-xs text-primary-500 hover:underline">Select all</button>
@@ -1505,7 +1675,6 @@ export default function DispatchManagePage() {
                     className="text-xs text-gray-400 hover:underline">Deselect all</button>
                 </div>
               </div>
-
               <div className="space-y-3">
                 {returnSelects.map((ret, idx) => (
                   <div key={ret.item_id}
@@ -1523,8 +1692,6 @@ export default function DispatchManagePage() {
                         <p className="text-xs text-gray-400">{ret.equipment_id} · {ret.serial ?? '—'}</p>
                       </div>
                     </div>
-
-                    {/* Return notes + extended date */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 ml-8">
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Return Notes</label>
@@ -1550,8 +1717,6 @@ export default function DispatchManagePage() {
                   </div>
                 ))}
               </div>
-
-              {/* Return driver */}
               <div className="border border-gray-100 rounded-xl p-4 space-y-3">
                 <p className="text-sm font-medium text-gray-700 flex items-center gap-2">
                   <User size={14} className="text-gray-400"/> Returning Driver <span className="text-xs font-normal text-gray-400">(optional)</span>
@@ -1559,38 +1724,32 @@ export default function DispatchManagePage() {
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Driver Name</label>
-                    <input className="input text-xs"
-                      placeholder="Full name"
+                    <input className="input text-xs" placeholder="Full name"
                       value={returnDriver.driver_name}
                       onChange={e => setReturnDriver(f => ({...f, driver_name: e.target.value}))}/>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Vehicle Type</label>
-                    <input className="input text-xs"
-                      placeholder="e.g. Flatbed"
+                    <input className="input text-xs" placeholder="e.g. Flatbed"
                       value={returnDriver.vehicle_type}
                       onChange={e => setReturnDriver(f => ({...f, vehicle_type: e.target.value}))}/>
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Vehicle Plate</label>
-                    <input className="input text-xs"
-                      placeholder="KWI 1234"
+                    <input className="input text-xs" placeholder="KWI 1234"
                       value={returnDriver.vehicle_plate}
                       onChange={e => setReturnDriver(f => ({...f, vehicle_plate: e.target.value}))}/>
                   </div>
                 </div>
               </div>
-
-              {/* Summary */}
               <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 space-y-1">
                 <p className="font-medium text-gray-700">Return Summary</p>
                 <p>✓ Returning now: <span className="font-medium text-green-700">{returnSelects.filter(r => r.selected).length} item(s)</span></p>
                 <p>⏳ Still outstanding: <span className="font-medium text-orange-600">{returnSelects.filter(r => !r.selected).length} item(s)</span></p>
                 {returnSelects.filter(r => !r.selected && r.extended_return_date).length > 0 && (
-                  <p>📅 Extended return dates set: <span className="font-medium text-orange-600">{returnSelects.filter(r => !r.selected && r.extended_return_date).length} item(s)</span></p>
+                  <p>📅 Extended dates set: <span className="font-medium text-orange-600">{returnSelects.filter(r => !r.selected && r.extended_return_date).length} item(s)</span></p>
                 )}
               </div>
-
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={() => { setReturnModal(null); setReturnSelects([]); setReturnDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); }} className="btn-secondary">Cancel</button>
                 <button onClick={handleReturnItems} disabled={returning || returnSelects.filter(r => r.selected).length === 0}
@@ -1604,7 +1763,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Cancel Modal ── */}
+      {/* Cancel Modal */}
       {cancelTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1637,7 +1796,7 @@ export default function DispatchManagePage() {
         </div>
       )}
 
-      {/* ── Quotation Preview Popup ── */}
+      {/* Quotation Preview */}
       {previewQuote && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           style={{ animation: 'dmFadeIn 0.18s ease' }}>
@@ -1682,13 +1841,11 @@ export default function DispatchManagePage() {
           </div>
         </div>
       )}
+
       <style>{`
         @keyframes dmFadeIn      { from { opacity: 0 } to { opacity: 1 } }
         @keyframes dmSlideUp     { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
-        @keyframes dmSlideDown   { from { opacity: 0; transform: translateY(-8px) } to { opacity: 1; transform: translateY(0) } }
-        @keyframes dmRowFadeIn   { from { opacity: 0; transform: translateX(-6px) } to { opacity: 1; transform: translateX(0) } }
         @keyframes dmBulkBarSlide { from { opacity: 0; transform: translate(-50%, 20px) scale(0.94) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
-        @keyframes dmCheckBounce { 0% { transform: scale(1) } 40% { transform: scale(1.25) } 75% { transform: scale(0.9) } 100% { transform: scale(1) } }
         @keyframes dmPopIn       { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
       `}</style>
     </div>

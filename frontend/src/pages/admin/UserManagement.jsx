@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getUsers, updateUser } from '../../api/users';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { X, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const ROLES = ['Admin','Sales Executive','Operations Manager','Warehouse Operator','Dispatch Coordinator','Finance Officer','Maintenance Engineer'];
-const DEPTS = ['Admin','Sales','Operations','Warehouse','Dispatch','Finance','Maintenance'];
+const TABLES = ['users'];
+const ROLES = ['Admin','Sales Executive','Operations Manager','Warehouse Operator','Dispatch Coordinator','Finance Officer','Maintenance Engineer','Procurement Manager','Head of IT'];
+const DEPTS = ['Admin','Sales','Operations','Warehouse','Dispatch','Finance','Maintenance','Procurement','IT'];
 
 export default function UserManagement() {
   const [users,       setUsers]       = useState([]);
@@ -23,6 +25,7 @@ export default function UserManagement() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(TABLES, load);
 
   const openEdit = (u) => {
     setForm({ name: u.name, role: u.role, department: u.department, username: u.username??'', is_active: u.is_active });

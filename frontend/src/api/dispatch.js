@@ -129,7 +129,7 @@ export async function getDispatchesFast(filters = {}) {
         dispatched_at, returned_at, return_notes, extended_return_date,
         equipment_units (
           equipment_id, serial_number, capacity, status, location,
-          equipment_types ( name )
+          equipment_types ( type_id, name, image_url )
         )
       )
     `)

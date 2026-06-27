@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { createPortal } from 'react-dom';
 import {
   getProcurements, createProcurement, updateProcurement,
@@ -27,6 +28,7 @@ import clsx from 'clsx';
 const TABS          = ['Requests','Purchase Orders','Vendors'];
 // const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
 const EMPTY_ITEM    = { description:'', capacity:'', unit_price_kwd:'', equipment_type_id:'' };
+const PROC_TABLES   = ['procurements','purchase_orders','vendors','procurement_items'];
 
 // ── Serial-number suggestion helpers ─────────────────────────────────────────
 
@@ -719,13 +721,7 @@ export default function ProcurementPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  useEffect(() => {
-    const ch = supabase.channel('procurement-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'procurements' }, loadAll)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchase_orders' }, loadAll)
-      .subscribe();
-    return () => ch.unsubscribe();
-  }, [loadAll]);
+  useRealtimeRefresh(PROC_TABLES, loadAll);
 
   // ── Procurement CRUD ──────────────────────────────────────────────────────
   const openProcAdd = () => {

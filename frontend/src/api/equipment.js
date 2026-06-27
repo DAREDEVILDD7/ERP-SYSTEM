@@ -145,6 +145,68 @@ export async function retireEquipment(id, reason) {
   return data;
 }
 
+// ── Lease management ─────────────────────────────────────────────────────────
+
+export async function confirmLeaseReturn(equipmentId, { notes, confirmed_at: confirmedAt }, userId) {
+  const returnedAt = confirmedAt
+    ? new Date(confirmedAt).toISOString()
+    : new Date().toISOString();
+  const today = returnedAt.split('T')[0];
+
+  const { data, error } = await supabase
+    .from('equipment_units')
+    .update({
+      lease_returned_at:  returnedAt,
+      lease_returned_by:  userId,
+      lease_return_notes: notes || null,
+      status:             'Retired',
+      retire_reason:      'Lease Ended — Returned to Vendor',
+      retire_date:        today,
+      is_retired:         true,
+    })
+    .eq('equipment_id', equipmentId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function extendLease(equipmentId, { newEndDate, notes, monthlyRateKwd }, userId) {
+  const { data: unit, error: fetchErr } = await supabase
+    .from('equipment_units')
+    .select('lease_end_date')
+    .eq('equipment_id', equipmentId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const [updErr] = await Promise.all([
+    supabase
+      .from('equipment_units')
+      .update({ lease_end_date: newEndDate })
+      .eq('equipment_id', equipmentId)
+      .then(r => r.error),
+    supabase.from('lease_extensions').insert({
+      equipment_id:      equipmentId,
+      previous_end_date: unit.lease_end_date,
+      new_end_date:      newEndDate,
+      extension_notes:   notes || null,
+      monthly_rate_kwd:  monthlyRateKwd ? Number(monthlyRateKwd) : null,
+      created_by:        userId,
+    }).then(r => r.error),
+  ]);
+  if (updErr) throw updErr;
+}
+
+export async function getLeaseExtensions(equipmentId) {
+  const { data, error } = await supabase
+    .from('lease_extensions')
+    .select('*')
+    .eq('equipment_id', equipmentId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function getDispatchableEquipment(excludeIds = []) {
   let query = supabase
     .from("equipment_units")

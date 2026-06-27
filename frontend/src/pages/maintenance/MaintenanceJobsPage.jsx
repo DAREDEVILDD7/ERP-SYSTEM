@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import {
   getMaintenanceJobs, createMaintenanceJob,
   updateMaintenanceJob, cancelMaintenanceJob, approveMaintenanceJob,
@@ -15,11 +16,11 @@ import {
   XCircle, CheckCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const STATUSES     = ['All','Open','In Progress','Completed','Cancelled'];
+const MAINT_TABLES = ['maintenance','equipment_units'];
 const MNT_STATUSES = ['Open','In Progress','Completed','Cancelled'];
 const ISSUE_TYPES  = ['Mechanical','Electrical','Hydraulic','Tyre','Cooling','Body','Other'];
 
@@ -72,12 +73,7 @@ export default function MaintenanceJobsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    const ch = supabase.channel('maintenance-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'maintenance' }, load)
-      .subscribe();
-    return () => ch.unsubscribe();
-  }, [load]);
+  useRealtimeRefresh(MAINT_TABLES, load);
 
   const openAdd = () => {
     setForm({ ...EMPTY, service_date: new Date().toISOString().split('T')[0] });

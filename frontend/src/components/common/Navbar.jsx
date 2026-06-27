@@ -1,5 +1,6 @@
 import { useAuth } from '../../context/AuthContext';
-import { Bell, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
+import NotificationBell from '../notifications/NotificationBell';
 
 export default function Navbar({ title }) {
   const { profile, role } = useAuth();
@@ -15,10 +16,7 @@ export default function Navbar({ title }) {
         </button>
 
         {/* Notifications */}
-        <button className="relative p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
-          <Bell size={18} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-        </button>
+        <NotificationBell />
 
         {/* User chip */}
         <div className="flex items-center gap-2 pl-3 border-l border-gray-100">

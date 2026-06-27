@@ -6,48 +6,75 @@ import {
   useCallback,
 } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { startSessionLog, endSessionLog } from "../api/sessionLogs";
 
 const AuthContext = createContext(null);
 
-const SESSION_KEY = "kwops_session"; // key used in sessionStorage
+const SESSION_KEY     = "kwops_session";
+const SESSION_LOG_KEY = "kwops_session_log_id";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function saveSession(profile) {
-  try {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(profile));
-  } catch (_) {}
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(profile)); } catch (_) {}
 }
-
 function loadSession() {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch (_) {
-    return null;
-  }
+  } catch (_) { return null; }
 }
-
 function clearSession() {
   try {
     sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_LOG_KEY);
   } catch (_) {}
+}
+function saveSessionLogId(id) {
+  try { sessionStorage.setItem(SESSION_LOG_KEY, id); } catch (_) {}
+}
+function loadSessionLogId() {
+  try { return sessionStorage.getItem(SESSION_LOG_KEY) ?? null; } catch (_) { return null; }
 }
 
 // ─── provider ───────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }) {
-  const [profile, setProfile] = useState(null);   // row from public.users (no password)
-  const [loading, setLoading] = useState(true);   // true while restoring session on mount
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
   // Restore session on page refresh
   useEffect(() => {
     const saved = loadSession();
-    if (saved) {
-      setProfile(saved);
-    }
+    if (saved) setProfile(saved);
     setLoading(false);
+  }, []);
+
+  // Best-effort session end on tab/browser close (fetch + keepalive survives page unload)
+  useEffect(() => {
+    const handlePageHide = () => {
+      const logId      = loadSessionLogId();
+      const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+      const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+      if (!logId || !supabaseUrl || !supabaseKey) return;
+      fetch(
+        `${supabaseUrl}/rest/v1/session_logs?session_log_id=eq.${encodeURIComponent(logId)}&logged_out_at=is.null`,
+        {
+          method:    'PATCH',
+          keepalive: true,
+          headers: {
+            apikey:          supabaseKey,
+            Authorization:   `Bearer ${supabaseKey}`,
+            'Content-Type':  'application/json',
+            Prefer:          'return=minimal',
+          },
+          body: JSON.stringify({ logged_out_at: new Date().toISOString() }),
+        }
+      ).catch(() => {});
+    };
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
   }, []);
 
   // ── login ─────────────────────────────────────────────────────────────────
@@ -74,7 +101,6 @@ export function AuthProvider({ children }) {
       throw new Error("Login service unavailable. Please try again.");
     }
 
-    // verify_login returns an empty array on bad credentials, one row on success
     if (!data || data.length === 0) {
       throw new Error("Invalid username or password.");
     }
@@ -85,12 +111,15 @@ export function AuthProvider({ children }) {
       throw new Error("Your account has been deactivated. Contact your administrator.");
     }
 
-    // Fire-and-forget: log the login timestamp.
-    // supabase.rpc() returns a PostgrestBuilder (thenable, not a full Promise),
-    // so .catch() doesn't exist on it directly. Wrap in Promise.resolve() first.
+    // Fire-and-forget: log the login timestamp
     Promise.resolve(
       supabase.rpc("log_last_login", { p_user_id: userProfile.user_id })
     ).catch(() => {});
+
+    // Fire-and-forget: start session log (never block login on failure)
+    Promise.resolve(startSessionLog(userProfile))
+      .then(logId => { if (logId) saveSessionLogId(logId); })
+      .catch(() => {});
 
     setProfile(userProfile);
     saveSession(userProfile);
@@ -99,8 +128,11 @@ export function AuthProvider({ children }) {
 
   // ── logout ────────────────────────────────────────────────────────────────
   const logout = useCallback(() => {
-    setProfile(null);
+    const logId = loadSessionLogId();
     clearSession();
+    setProfile(null);
+    // Fire-and-forget session end (don't block logout on it)
+    if (logId) Promise.resolve(endSessionLog(logId)).catch(() => {});
   }, []);
 
   // ── change own password ───────────────────────────────────────────────────
@@ -144,8 +176,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider
       value={{
-        // Keep the same shape as before so all existing code keeps working
-        user:               profile,   // alias — components using `user` still work
+        user:               profile,
         profile,
         role:               profile?.role ?? null,
         loading,

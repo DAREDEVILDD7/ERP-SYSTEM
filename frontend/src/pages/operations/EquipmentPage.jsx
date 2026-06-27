@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from "react";
+import { useRealtimeRefresh } from "../../hooks/useRealtimeRefresh";
 import {
   getEquipmentUnitsWithProcurement,
   getEquipmentTypes,
@@ -6,7 +7,11 @@ import {
   updateEquipmentUnit,
   retireEquipment,
   getSerialNumbersByType,
+  confirmLeaseReturn,
+  extendLease,
+  getLeaseExtensions,
 } from "../../api/equipment";
+import { createLeaseInvoice } from "../../api/finance";
 import { createMaintenanceJob } from "../../api/maintenance";
 import { useAuth } from "../../context/AuthContext";
 import { hasPermission } from "../../lib/rolePermissions";
@@ -24,12 +29,20 @@ import {
   Eye,
   Archive,
   Wrench,
+  Calendar,
+  RotateCcw,
+  FileText,
+  AlertTriangle,
+  Clock,
+  CheckCircle,
+  TrendingUp,
 } from "lucide-react";
 import { format } from "date-fns";
-import { supabase } from "../../lib/supabaseClient";
 import toast from "react-hot-toast";
 import clsx from "clsx";
 import { createEquipmentType } from "../../api/equipment";
+
+const EQ_TABLES = ['equipment_units','equipment_types','lease_extensions','lease_invoices'];
 
 const ALL_STATUSES = [
   "Available",
@@ -98,6 +111,15 @@ export default function EquipmentPage() {
   });
   const [typeFormLoading, setTypeFormLoading] = useState(false);
 
+  // Lease management state
+  const [leaseTarget,       setLeaseTarget]       = useState(null);
+  const [leaseModal,        setLeaseModal]        = useState(null); // 'return' | 'extend' | 'invoice'
+  const [leaseActionLoading, setLeaseActionLoading] = useState(false);
+  const [leaseReturnForm,   setLeaseReturnForm]   = useState({ notes: '', confirmed_at: '' });
+  const [leaseExtendForm,   setLeaseExtendForm]   = useState({ new_end_date: '', notes: '', monthly_rate_kwd: '' });
+  const [leaseInvoiceForm,  setLeaseInvoiceForm]  = useState({ period_start: '', period_end: '', amount_kwd: '', notes: '', status: 'Draft' });
+  const [leaseExtensions,   setLeaseExtensions]   = useState([]);
+
   // Equipment type search state
   const [typeSearch, setTypeSearch] = useState("");
   const [showTypeSearch, setShowTypeSearch] = useState(false);
@@ -146,20 +168,11 @@ export default function EquipmentPage() {
     load();
   }, [load]);
 
-  useEffect(() => {
-    const ch = supabase
-      .channel("equipment-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "equipment_units" },
-        () => {
-          clearEquipmentCache();
-          load(true);
-        },
-      )
-      .subscribe();
-    return () => ch.unsubscribe();
+  const realtimeEquipLoad = useCallback(() => {
+    clearEquipmentCache();
+    load(true);
   }, [clearEquipmentCache, load]);
+  useRealtimeRefresh(EQ_TABLES, realtimeEquipLoad);
 
   // Status counts from all units (unfiltered)
   const statusCounts = ALL_STATUSES.reduce((acc, s) => {
@@ -380,6 +393,96 @@ export default function EquipmentPage() {
     } finally {
       setRetiring(false);
     }
+  };
+
+  // ── Lease helpers ──────────────────────────────────────────────────────────
+  const getLeaseInfo = (u) => {
+    if (u.procurement_type !== 'Lease' || !u.lease_end_date) return null;
+    if (u.lease_returned_at) return { status: 'Returned', daysLeft: null, isExpired: false, isExpiring: false };
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const end = new Date(u.lease_end_date); end.setHours(0, 0, 0, 0);
+    const daysLeft = Math.ceil((end - today) / 86400000);
+    const isExpired  = daysLeft < 0;
+    const isExpiring = !isExpired && daysLeft <= 14;
+    const status = isExpired ? 'Expired' : isExpiring ? 'Expiring' : 'Active';
+    return { status, daysLeft, isExpired, isExpiring };
+  };
+
+  const openLeaseAction = async (unit, action) => {
+    setLeaseTarget(unit);
+    setLeaseModal(action);
+    if (action === 'return') {
+      setLeaseReturnForm({ notes: '', confirmed_at: new Date().toISOString().split('T')[0] });
+    } else if (action === 'extend') {
+      setLeaseExtendForm({ new_end_date: unit.lease_end_date ?? '', notes: '', monthly_rate_kwd: '' });
+      const exts = await getLeaseExtensions(unit.equipment_id).catch(() => []);
+      setLeaseExtensions(exts);
+    } else if (action === 'invoice') {
+      const start = unit.lease_start_date ?? '';
+      const end   = unit.lease_end_date   ?? '';
+      // Auto-calculate amount from daily rate × days if both dates are set
+      let autoAmount = '';
+      if (start && end && unit.daily_rate_kwd) {
+        const days = Math.max(1, Math.ceil((new Date(end) - new Date(start)) / 86400000));
+        autoAmount = (Number(unit.daily_rate_kwd) * days).toFixed(3);
+      }
+      setLeaseInvoiceForm({ period_start: start, period_end: end, amount_kwd: autoAmount, notes: '', status: 'Draft' });
+    }
+  };
+
+  const handleLeaseReturn = async () => {
+    if (!leaseTarget) return;
+    setLeaseActionLoading(true);
+    try {
+      await confirmLeaseReturn(leaseTarget.equipment_id, leaseReturnForm, profile.user_id);
+      toast.success('Lease return confirmed — equipment retired from fleet');
+      setLeaseModal(null); setLeaseTarget(null);
+      clearEquipmentCache(); load(true);
+    } catch (err) {
+      toast.error(err.message || 'Failed to confirm return');
+    } finally { setLeaseActionLoading(false); }
+  };
+
+  const handleLeaseExtend = async () => {
+    if (!leaseExtendForm.new_end_date) return toast.error('Select new end date');
+    if (leaseTarget?.lease_end_date && leaseExtendForm.new_end_date <= leaseTarget.lease_end_date)
+      return toast.error('New end date must be after current end date');
+    setLeaseActionLoading(true);
+    try {
+      await extendLease(leaseTarget.equipment_id, {
+        newEndDate:     leaseExtendForm.new_end_date,
+        notes:          leaseExtendForm.notes,
+        monthlyRateKwd: leaseExtendForm.monthly_rate_kwd,
+      }, profile.user_id);
+      toast.success('Lease extended successfully');
+      setLeaseModal(null); setLeaseTarget(null);
+      clearEquipmentCache(); load(true);
+    } catch (err) {
+      toast.error(err.message || 'Failed to extend lease');
+    } finally { setLeaseActionLoading(false); }
+  };
+
+  const handleLeaseInvoice = async () => {
+    if (!leaseInvoiceForm.period_start) return toast.error('Enter period start date');
+    if (!leaseInvoiceForm.period_end)   return toast.error('Enter period end date');
+    if (!leaseInvoiceForm.amount_kwd)   return toast.error('Enter invoice amount');
+    if (leaseInvoiceForm.period_end < leaseInvoiceForm.period_start) return toast.error('Period end must be after period start');
+    setLeaseActionLoading(true);
+    try {
+      await createLeaseInvoice({
+        equipment_id:  leaseTarget.equipment_id,
+        period_start:  leaseInvoiceForm.period_start,
+        period_end:    leaseInvoiceForm.period_end,
+        amount_kwd:    Number(leaseInvoiceForm.amount_kwd),
+        notes:         leaseInvoiceForm.notes || null,
+        status:        leaseInvoiceForm.status,
+        created_by:    profile.user_id,
+      });
+      toast.success('Lease invoice created — visible in Finance → Lease Invoices');
+      setLeaseModal(null); setLeaseTarget(null);
+    } catch (err) {
+      toast.error(err.message || 'Failed to create lease invoice');
+    } finally { setLeaseActionLoading(false); }
   };
 
   const displayedUnits = viewRetired ? retiredFiltered : activeFiltered;
@@ -634,27 +737,36 @@ export default function EquipmentPage() {
                       </td>
                       <td className="px-5 py-3 text-xs">
                         {u.procurement_id ? (
-                          <div>
-                            <span
-                              className={clsx(
-                                "badge border text-xs",
-                                u.procurement_type === "Lease"
-                                  ? "bg-purple-50 text-purple-700 border-purple-100"
-                                  : "bg-blue-50 text-blue-700 border-blue-100",
-                              )}
-                            >
-                              {u.procurement_type ?? "Purchase"}
+                          <div className="space-y-1">
+                            <span className={clsx('badge border text-xs', u.procurement_type === 'Lease' ? 'bg-purple-50 text-purple-700 border-purple-100' : 'bg-blue-50 text-blue-700 border-blue-100')}>
+                              {u.procurement_type ?? 'Purchase'}
                             </span>
-                            {u.procurement_type === "Lease" &&
-                              u.lease_end_date && (
-                                <p className="text-gray-400 mt-0.5">
-                                  Until{" "}
-                                  {format(
-                                    new Date(u.lease_end_date),
-                                    "dd MMM yy",
-                                  )}
+                            {(() => {
+                              const li = getLeaseInfo(u);
+                              if (!li) return null;
+                              if (li.status === 'Returned') return (
+                                <p className="flex items-center gap-1 text-green-600">
+                                  <CheckCircle size={10}/> Returned
                                 </p>
-                              )}
+                              );
+                              if (li.isExpired) return (
+                                <>
+                                  <p className="text-gray-400">Until {format(new Date(u.lease_end_date),'dd MMM yy')}</p>
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-md eq-pulse-red">
+                                    <AlertTriangle size={9}/> Expired {Math.abs(li.daysLeft)}d ago
+                                  </span>
+                                </>
+                              );
+                              if (li.isExpiring) return (
+                                <>
+                                  <p className="text-gray-400">Until {format(new Date(u.lease_end_date),'dd MMM yy')}</p>
+                                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-md eq-pulse-orange">
+                                    <Clock size={9}/> {li.daysLeft}d left
+                                  </span>
+                                </>
+                              );
+                              return <p className="text-gray-400">Until {format(new Date(u.lease_end_date),'dd MMM yy')}</p>;
+                            })()}
                           </div>
                         ) : (
                           <span className="text-gray-300">Own</span>
@@ -702,18 +814,40 @@ export default function EquipmentPage() {
                                 <option key={s}>{s}</option>
                               ))}
                             </select>
-                            <button
-                              onClick={() => openEdit(u)}
-                              className="text-xs text-primary-500 hover:underline"
-                            >
+                            <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline">
                               Edit
                             </button>
-                            <button
-                              onClick={() => setPreviewUnit(u)}
-                              className="text-gray-400 hover:text-gray-600"
-                            >
+                            <button onClick={() => setPreviewUnit(u)} className="text-gray-400 hover:text-gray-600">
                               <Eye size={14} />
                             </button>
+                            {/* Lease action buttons */}
+                            {(() => {
+                              const li = getLeaseInfo(u);
+                              if (!li || li.status === 'Returned') return null;
+                              return (
+                                <div className="flex items-center gap-1 ml-1 pl-1 border-l border-gray-100">
+                                  {(li.isExpired || li.status === 'Active' || li.isExpiring) && (
+                                    <button title="Confirm Lease Return"
+                                      onClick={() => openLeaseAction(u, 'return')}
+                                      className="p-1 rounded-lg text-green-600 hover:bg-green-50 transition-colors">
+                                      <RotateCcw size={13}/>
+                                    </button>
+                                  )}
+                                  {!li.isExpired && (
+                                    <button title="Extend Lease"
+                                      onClick={() => openLeaseAction(u, 'extend')}
+                                      className="p-1 rounded-lg text-orange-500 hover:bg-orange-50 transition-colors">
+                                      <TrendingUp size={13}/>
+                                    </button>
+                                  )}
+                                  <button title="Create Lease Invoice"
+                                    onClick={() => openLeaseAction(u, 'invoice')}
+                                    className="p-1 rounded-lg text-purple-500 hover:bg-purple-50 transition-colors">
+                                    <FileText size={13}/>
+                                  </button>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
                       )}
@@ -747,28 +881,60 @@ export default function EquipmentPage() {
                     {format(new Date(u.expected_return_date), "dd MMM yyyy")}
                   </p>
                 )}
+                {/* Lease expiry badge for mobile */}
+                {(() => {
+                  const li = getLeaseInfo(u);
+                  if (!li) return null;
+                  if (li.status === 'Returned') return <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle size={10}/> Lease returned</p>;
+                  if (li.isExpired) return (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-md mt-1 eq-pulse-red">
+                      <AlertTriangle size={9}/> Lease expired {Math.abs(li.daysLeft)}d ago
+                    </span>
+                  );
+                  if (li.isExpiring) return (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-md mt-1">
+                      <Clock size={9}/> Lease expires in {li.daysLeft}d
+                    </span>
+                  );
+                  return null;
+                })()}
                 {u.retire_reason && viewRetired && (
                   <p className="text-xs text-gray-400 mt-1">
                     Retired: {u.retire_reason}
                   </p>
                 )}
                 {canWrite && !viewRetired && (
-                  <div className="flex gap-2 mt-2">
-                    <select
-                      className="text-xs border border-gray-200 rounded-lg px-2 py-1 flex-1"
-                      value={u.status}
-                      onChange={(e) => handleStatusChange(u, e.target.value)}
-                    >
-                      {ALL_STATUSES.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => openEdit(u)}
-                      className="text-xs text-primary-500 hover:underline px-2"
-                    >
-                      Edit
-                    </button>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <div className="flex gap-2">
+                      <select className="text-xs border border-gray-200 rounded-lg px-2 py-1 flex-1" value={u.status} onChange={(e) => handleStatusChange(u, e.target.value)}>
+                        {ALL_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                      </select>
+                      <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline px-2">Edit</button>
+                    </div>
+                    {(() => {
+                      const li = getLeaseInfo(u);
+                      if (!li || li.status === 'Returned') return null;
+                      return (
+                        <div className="flex gap-1.5 flex-wrap">
+                          {(li.isExpired || li.isExpiring || li.status === 'Active') && (
+                            <button onClick={() => openLeaseAction(u, 'return')}
+                              className="flex items-center gap-1 text-xs bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-lg">
+                              <RotateCcw size={11}/> Return
+                            </button>
+                          )}
+                          {!li.isExpired && (
+                            <button onClick={() => openLeaseAction(u, 'extend')}
+                              className="flex items-center gap-1 text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2.5 py-1 rounded-lg">
+                              <TrendingUp size={11}/> Extend
+                            </button>
+                          )}
+                          <button onClick={() => openLeaseAction(u, 'invoice')}
+                            className="flex items-center gap-1 text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-lg">
+                            <FileText size={11}/> Invoice
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -1286,6 +1452,246 @@ export default function EquipmentPage() {
           </div>
         </div>
       )}
+      {/* ── Confirm Lease Return Modal ── */}
+      {leaseModal === 'return' && leaseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" style={{ animation: 'eqFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" style={{ animation: 'eqSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <RotateCcw size={17} className="text-green-500"/> Confirm Lease Return
+              </h3>
+              <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Equipment info */}
+              <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                <p className="text-sm font-semibold text-purple-800">{leaseTarget.equipment_types?.name} {leaseTarget.capacity}</p>
+                <p className="text-xs text-purple-500 mt-0.5">{leaseTarget.equipment_id} · {leaseTarget.serial_number ?? '—'}</p>
+                {leaseTarget.lease_end_date && (
+                  <p className="text-xs text-purple-600 mt-1 flex items-center gap-1">
+                    <Calendar size={10}/> Lease end: {format(new Date(leaseTarget.lease_end_date), 'dd MMM yyyy')}
+                    {getLeaseInfo(leaseTarget)?.isExpired && (
+                      <span className="ml-1 text-red-600 font-medium">— Expired</span>
+                    )}
+                  </p>
+                )}
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-500"/>
+                <span>Confirming this will <strong>retire the equipment from the fleet</strong> and record the return. The unit will no longer appear as active. This action cannot be undone.</span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
+                  <Calendar size={13} className="text-primary-400"/> Return Date
+                </label>
+                <div className="relative">
+                  <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"/>
+                  <input type="date" className="input pl-9 eq-date"
+                    value={leaseReturnForm.confirmed_at}
+                    onChange={e => setLeaseReturnForm(f => ({...f, confirmed_at: e.target.value}))}/>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Return Notes</label>
+                <textarea className="input resize-y" rows={2}
+                  placeholder="Condition on return, any damages noted…"
+                  value={leaseReturnForm.notes}
+                  onChange={e => setLeaseReturnForm(f => ({...f, notes: e.target.value}))}/>
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="btn-secondary">Cancel</button>
+                <button onClick={handleLeaseReturn} disabled={leaseActionLoading}
+                  className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-colors">
+                  {leaseActionLoading ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
+                  {leaseActionLoading ? 'Confirming…' : 'Confirm Return'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Extend Lease Modal ── */}
+      {leaseModal === 'extend' && leaseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" style={{ animation: 'eqFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" style={{ animation: 'eqSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <TrendingUp size={17} className="text-orange-500"/> Extend Lease Period
+              </h3>
+              <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Equipment info */}
+              <div className="bg-orange-50 border border-orange-100 rounded-xl p-3">
+                <p className="text-sm font-semibold text-orange-800">{leaseTarget.equipment_types?.name} {leaseTarget.capacity}</p>
+                <p className="text-xs text-orange-500 mt-0.5">{leaseTarget.equipment_id} · {leaseTarget.serial_number ?? '—'}</p>
+                {leaseTarget.lease_end_date && (
+                  <p className="text-xs text-orange-600 mt-1 flex items-center gap-1">
+                    <Calendar size={10}/> Current end: <span className="font-semibold ml-1">{format(new Date(leaseTarget.lease_end_date), 'dd MMM yyyy')}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Previous extensions */}
+              {leaseExtensions.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Previous Extensions</p>
+                  {leaseExtensions.map(ext => (
+                    <div key={ext.extension_id} className="flex items-center justify-between text-xs bg-gray-50 rounded-lg px-3 py-2" style={{ animation: 'eqPopIn 0.2s ease' }}>
+                      <span className="text-gray-500 line-through">{ext.previous_end_date && format(new Date(ext.previous_end_date), 'dd MMM yyyy')}</span>
+                      <span className="text-gray-400 mx-2">→</span>
+                      <span className="font-medium text-gray-700">{ext.new_end_date && format(new Date(ext.new_end_date), 'dd MMM yyyy')}</span>
+                      {ext.extension_notes && <span className="text-gray-400 ml-2 truncate max-w-[100px]">{ext.extension_notes}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">New End Date <span className="text-red-500">*</span></label>
+                <div className="relative">
+                  <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-orange-400 pointer-events-none"/>
+                  <input type="date" className="input pl-9 eq-date"
+                    min={leaseTarget.lease_end_date ?? undefined}
+                    value={leaseExtendForm.new_end_date}
+                    onChange={e => setLeaseExtendForm(f => ({...f, new_end_date: e.target.value}))}/>
+                </div>
+                {leaseExtendForm.new_end_date && leaseTarget.lease_end_date && leaseExtendForm.new_end_date > leaseTarget.lease_end_date && (
+                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                    <CheckCircle size={10}/>
+                    Extended by {Math.ceil((new Date(leaseExtendForm.new_end_date) - new Date(leaseTarget.lease_end_date)) / 86400000)} days
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Monthly Rate (KWD) <span className="text-xs text-gray-400 font-normal">optional</span></label>
+                <input type="number" min="0" step="0.001" className="input"
+                  placeholder="Override monthly lease rate for extended period…"
+                  value={leaseExtendForm.monthly_rate_kwd}
+                  onChange={e => setLeaseExtendForm(f => ({...f, monthly_rate_kwd: e.target.value}))}/>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Extension Notes</label>
+                <textarea className="input resize-y" rows={2}
+                  placeholder="Reason for extension, contract amendment reference…"
+                  value={leaseExtendForm.notes}
+                  onChange={e => setLeaseExtendForm(f => ({...f, notes: e.target.value}))}/>
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="btn-secondary">Cancel</button>
+                <button onClick={handleLeaseExtend} disabled={leaseActionLoading || !leaseExtendForm.new_end_date}
+                  className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-colors">
+                  {leaseActionLoading ? <Loader2 size={14} className="animate-spin"/> : <TrendingUp size={14}/>}
+                  {leaseActionLoading ? 'Extending…' : 'Extend Lease'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create Lease Invoice Modal ── */}
+      {leaseModal === 'invoice' && leaseTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" style={{ animation: 'eqFadeIn 0.18s ease' }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto" style={{ animation: 'eqSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
+            <div className="flex items-center justify-between p-5 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <FileText size={17} className="text-purple-500"/> Create Lease Invoice
+              </h3>
+              <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {/* Equipment info */}
+              <div className="bg-purple-50 border border-purple-100 rounded-xl p-3">
+                <p className="text-sm font-semibold text-purple-800">{leaseTarget.equipment_types?.name} {leaseTarget.capacity}</p>
+                <p className="text-xs text-purple-500 mt-0.5">{leaseTarget.equipment_id} · {leaseTarget.serial_number ?? '—'}</p>
+                <p className="text-xs text-purple-600 mt-1">Daily Rate: KWD {Number(leaseTarget.daily_rate_kwd).toLocaleString('en-US',{minimumFractionDigits:3})}</p>
+                {leaseTarget.procurements?.vendors?.name && (
+                  <p className="text-xs text-purple-500 mt-0.5">Vendor: {leaseTarget.procurements.vendors.name}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Period Start <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 pointer-events-none"/>
+                    <input type="date" className="input pl-9 eq-date"
+                      value={leaseInvoiceForm.period_start}
+                      onChange={e => {
+                        const start = e.target.value;
+                        setLeaseInvoiceForm(f => {
+                          const days = (start && f.period_end) ? Math.max(1, Math.ceil((new Date(f.period_end) - new Date(start)) / 86400000)) : null;
+                          const auto = days && leaseTarget.daily_rate_kwd ? (Number(leaseTarget.daily_rate_kwd) * days).toFixed(3) : f.amount_kwd;
+                          return {...f, period_start: start, amount_kwd: auto};
+                        });
+                      }}/>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Period End <span className="text-red-500">*</span></label>
+                  <div className="relative">
+                    <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-400 pointer-events-none"/>
+                    <input type="date" className="input pl-9 eq-date"
+                      value={leaseInvoiceForm.period_end}
+                      onChange={e => {
+                        const end = e.target.value;
+                        setLeaseInvoiceForm(f => {
+                          const days = (f.period_start && end) ? Math.max(1, Math.ceil((new Date(end) - new Date(f.period_start)) / 86400000)) : null;
+                          const auto = days && leaseTarget.daily_rate_kwd ? (Number(leaseTarget.daily_rate_kwd) * days).toFixed(3) : f.amount_kwd;
+                          return {...f, period_end: end, amount_kwd: auto};
+                        });
+                      }}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* Day count */}
+              {leaseInvoiceForm.period_start && leaseInvoiceForm.period_end && leaseInvoiceForm.period_end >= leaseInvoiceForm.period_start && (
+                <div className="bg-gray-50 rounded-xl px-3 py-2 text-xs text-gray-600 flex items-center justify-between" style={{ animation: 'eqPopIn 0.18s ease' }}>
+                  <span>{Math.ceil((new Date(leaseInvoiceForm.period_end) - new Date(leaseInvoiceForm.period_start)) / 86400000)} days</span>
+                  <span>× KWD {Number(leaseTarget.daily_rate_kwd).toLocaleString()} / day</span>
+                  <span className="font-semibold text-purple-700">= KWD {leaseInvoiceForm.amount_kwd}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Amount (KWD) <span className="text-red-500">*</span></label>
+                <input type="number" min="0" step="0.001" className="input"
+                  value={leaseInvoiceForm.amount_kwd}
+                  onChange={e => setLeaseInvoiceForm(f => ({...f, amount_kwd: e.target.value}))}
+                  placeholder="Auto-calculated or enter manually"/>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Status</label>
+                  <select className="input" value={leaseInvoiceForm.status}
+                    onChange={e => setLeaseInvoiceForm(f => ({...f, status: e.target.value}))}>
+                    {['Draft','Sent','Paid','Cancelled'].map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
+                <textarea className="input resize-y" rows={2}
+                  placeholder="Invoice reference, payment terms…"
+                  value={leaseInvoiceForm.notes}
+                  onChange={e => setLeaseInvoiceForm(f => ({...f, notes: e.target.value}))}/>
+              </div>
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button onClick={() => { setLeaseModal(null); setLeaseTarget(null); }} className="btn-secondary">Cancel</button>
+                <button onClick={handleLeaseInvoice} disabled={leaseActionLoading}
+                  className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50 transition-colors">
+                  {leaseActionLoading ? <Loader2 size={14} className="animate-spin"/> : <FileText size={14}/>}
+                  {leaseActionLoading ? 'Creating…' : 'Create Invoice'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── New Equipment Type Modal ── */}
       {showTypeModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4">
@@ -1456,6 +1862,22 @@ export default function EquipmentPage() {
           </div>
         </div>
       )}
+      <style>{`
+        @keyframes eqFadeIn  { from { opacity:0 } to { opacity:1 } }
+        @keyframes eqSlideUp { from { opacity:0; transform:translateY(18px) scale(0.97) } to { opacity:1; transform:translateY(0) scale(1) } }
+        @keyframes eqPopIn   { from { opacity:0; transform:scale(0.93) } to { opacity:1; transform:scale(1) } }
+        @keyframes eqPulseRed    { 0%,100% { opacity:1 } 50% { opacity:0.55 } }
+        @keyframes eqPulseOrange { 0%,100% { opacity:1 } 50% { opacity:0.6 } }
+        .eq-pulse-red    { animation: eqPulseRed    2s ease-in-out infinite; }
+        .eq-pulse-orange { animation: eqPulseOrange 2.5s ease-in-out infinite; }
+        .eq-date { color-scheme: light; }
+        .eq-date::-webkit-calendar-picker-indicator {
+          cursor: pointer; opacity: 0.45; margin-right: 2px;
+          filter: invert(36%) sepia(75%) saturate(400%) hue-rotate(210deg);
+        }
+        .eq-date::-webkit-calendar-picker-indicator:hover { opacity: 0.9; }
+        .eq-date:focus { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,0.15); }
+      `}</style>
     </div>
   );
 }

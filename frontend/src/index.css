@@ -31,3 +31,77 @@
 .safe-area-pb {
   padding-bottom: env(safe-area-inset-bottom);
 }
+
+/* ── Neomorphism design system ───────────────────────────────────────────── */
+:root {
+  --neo-bg:    #e2e8f0;
+  --neo-dark:  rgba(163,177,198,0.65);
+  --neo-light: rgba(255,255,255,0.85);
+}
+
+/* Page wrapper — sets the neomorphic surface */
+.neo-page {
+  background: var(--neo-bg);
+  min-height: 100%;
+}
+
+/* Raised card */
+.neo-card {
+  background: var(--neo-bg);
+  border-radius: 20px;
+  border: none;
+  box-shadow: 8px 8px 18px var(--neo-dark), -8px -8px 18px var(--neo-light);
+  transition: box-shadow 0.22s ease, transform 0.22s ease;
+}
+.neo-card:hover {
+  box-shadow: 10px 10px 22px var(--neo-dark), -10px -10px 22px var(--neo-light);
+  transform: translateY(-2px);
+}
+
+/* KPI card — slightly convex lift */
+.neo-kpi {
+  background: linear-gradient(145deg, #eaf0f7, #d8dfe9);
+  border-radius: 18px;
+  border: none;
+  box-shadow: 6px 6px 14px var(--neo-dark), -6px -6px 14px var(--neo-light);
+  transition: box-shadow 0.22s ease, transform 0.22s ease;
+  cursor: default;
+}
+.neo-kpi:hover {
+  box-shadow: 8px 8px 18px var(--neo-dark), -8px -8px 18px var(--neo-light);
+  transform: translateY(-3px) scale(1.015);
+}
+
+/* Inset container — used for icon wells and chart areas */
+.neo-inset {
+  background: var(--neo-bg);
+  border-radius: 14px;
+  box-shadow: inset 4px 4px 8px var(--neo-dark), inset -4px -4px 8px var(--neo-light);
+}
+
+/* Small flat pill */
+.neo-flat {
+  background: var(--neo-bg);
+  border-radius: 10px;
+  box-shadow: 3px 3px 7px var(--neo-dark), -3px -3px 7px var(--neo-light);
+}
+
+/* Table row hover */
+.neo-row:hover {
+  background: rgba(255,255,255,0.45);
+  border-radius: 10px;
+}
+
+/* Divider */
+.neo-divider {
+  border-color: rgba(163,177,198,0.25);
+}
+
+/* Status dot pulse for neo theme */
+.neo-pulse {
+  animation: neoPulse 1.8s ease-in-out infinite;
+}
+@keyframes neoPulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.4; transform:scale(1.3); }
+}

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Component } from "react";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "./context/AuthContext";
+import { NotificationProvider } from "./context/NotificationContext";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import Layout from "./components/common/Layout";
 import Login from "./pages/auth/Login";
@@ -15,6 +16,7 @@ import MaintenanceJobsPage from "./pages/maintenance/MaintenanceJobsPage";
 import InvoicesPage from "./pages/finance/InvoicesPage";
 import ChatPage from "./pages/chat/ChatPage";
 import UserManagement from "./pages/admin/UserManagement";
+import AuditLogs from "./pages/admin/AuditLogs";
 import ProcurementPage from "./pages/procurement/ProcurementPage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -64,6 +66,7 @@ export default function App() {
     <BrowserRouter>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <NotificationProvider>
           <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -161,13 +164,14 @@ export default function App() {
                 path="audit-logs"
                 element={
                   <ProtectedRoute navKey="audit-logs">
-                    <Placeholder name="Audit Logs" />
+                    <AuditLogs />
                   </ProtectedRoute>
                 }
               />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
+          </NotificationProvider>
         </AuthProvider>
       </QueryClientProvider>
     </BrowserRouter>

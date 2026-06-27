@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getCustomers, createCustomer, updateCustomer } from '../../api/customers';
+import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
@@ -9,6 +10,7 @@ import toast from 'react-hot-toast';
 
 const EMPTY = { company_name:'', contact_person:'', phone:'', email:'', industry:'', address:'', notes:'' };
 const INDUSTRIES = ['Oil & Gas','Engineering','Construction','Logistics','Manufacturing','Government','Other'];
+const TABLES = ['customers'];
 
 export default function CustomersPage() {
   const { role } = useAuth();
@@ -32,6 +34,7 @@ export default function CustomersPage() {
   }, [search]);
 
   useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(TABLES, load);
 
   const openAdd  = () => { setForm(EMPTY); setSelected(null); setShowModal(true); };
   const openEdit = (c) => { setForm({ company_name: c.company_name, contact_person: c.contact_person, phone: c.phone??'', email: c.email??'', industry: c.industry??'', address: c.address??'', notes: c.notes??'' }); setSelected(c); setShowModal(true); };
