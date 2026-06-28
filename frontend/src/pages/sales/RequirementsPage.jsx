@@ -6,6 +6,7 @@ import { hasPermission } from '../../lib/rolePermissions';
 import { useAppStore } from '../../store/useAppStore';
 import StatusBadge from '../../components/common/StatusBadge';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import RequirementForm from '../../components/requirements/RequirementForm';
 import RequirementDetail from '../../components/requirements/RequirementDetail';
@@ -280,7 +281,7 @@ export default function RequirementsPage() {
       )}
 
       {/* Results */}
-      {loading ? <LoadingSpinner fullscreen={false}/> : filtered.length === 0 ? (
+      {loading ? <SkeletonTable rows={7} colWidths={[80, 180, 130, 110, 110, 70, 80, 90]} /> : filtered.length === 0 ? (
         <EmptyState
           message={hasActiveFilters ? 'No requirements match your filters' : 'No requirements yet'}
           icon={ClipboardList}

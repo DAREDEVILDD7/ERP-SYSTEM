@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { canAccess } from '../../lib/rolePermissions';
+import { useNotifications } from '../../context/NotificationContext';
 import {
   LayoutDashboard, ClipboardList, FileText, Package,
   Truck, Wrench, DollarSign, Users, MessageSquare,
@@ -29,6 +30,8 @@ export default function MobileNav() {
   const { role, profile, logout } = useAuth();
   const navigate = useNavigate();
   const [showMore, setShowMore] = useState(false);
+  const { notifications } = useNotifications();
+  const unreadChatCount = notifications.filter(n => n.type === 'chat' && !n.is_read).length;
 
   const visible = ALL_NAV.filter(item => canAccess(role, item.key));
   const primary  = visible.slice(0, 4);
@@ -54,7 +57,14 @@ export default function MobileNav() {
                 isActive ? 'text-primary-600' : 'text-gray-400'
               )}
             >
-              <item.icon size={20} />
+              <div className="relative">
+                <item.icon size={20} />
+                {item.key === 'chat' && unreadChatCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[15px] h-[15px] bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none ring-1 ring-white">
+                    {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-medium">{item.label}</span>
             </NavLink>
           ))}
@@ -103,7 +113,14 @@ export default function MobileNav() {
                     isActive ? 'bg-primary-50 text-primary-600' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   )}
                 >
-                  <item.icon size={22} />
+                  <div className="relative">
+                    <item.icon size={22} />
+                    {item.key === 'chat' && unreadChatCount > 0 && (
+                      <span className="absolute -top-1.5 -right-2 min-w-[15px] h-[15px] bg-rose-500 text-white text-[8px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none ring-1 ring-white">
+                        {unreadChatCount > 99 ? '99+' : unreadChatCount}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-medium text-center leading-tight">{item.label}</span>
                 </NavLink>
               ))}

@@ -3,7 +3,7 @@ import { getCustomers, createCustomer, updateCustomer } from '../../api/customer
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import { Plus, Search, Users, X, Loader2, Phone, Mail, Building } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -77,7 +77,7 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false} /> : customers.length === 0 ? <EmptyState message="No customers found" icon={Users} /> : (
+      {loading ? <SkeletonTable rows={7} colWidths={[140, 110, 100, 130, 90, 70]} /> : customers.length === 0 ? <EmptyState message="No customers found" icon={Users} /> : (
         <>
           <div className="card hidden md:block overflow-hidden">
             <table className="w-full text-sm">

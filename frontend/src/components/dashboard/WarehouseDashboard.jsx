@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { fetchWarehouseStats } from '../../api/dashboard';
 import { useAuth } from '../../context/AuthContext';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
-import LoadingSpinner from '../common/LoadingSpinner';
+import { SkeletonDashboard } from '../common/Skeleton';
 import {
   Package, CheckCircle, Wrench, Truck, Archive,
   AlertTriangle, RefreshCw, BarChart2,
@@ -54,7 +54,7 @@ export default function WarehouseDashboard() {
   const realtimeLoad = useCallback(() => load(true), [load]);
   useRealtimeRefresh(TABLES, realtimeLoad);
 
-  if (loading) return <LoadingSpinner fullscreen={false} />;
+  if (loading) return <SkeletonDashboard statCount={4} />;
 
   if (error && !data) return (
     <div className="neo-card p-10 text-center wh-fade">

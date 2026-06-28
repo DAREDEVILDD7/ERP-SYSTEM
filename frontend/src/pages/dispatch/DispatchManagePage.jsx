@@ -43,8 +43,9 @@ const STATUS_SIDEBAR = {
   Cancelled:    { color: '#f87171', r: 248, g: 113, b: 113 },
 };
 
+// Sk is re-exported from shared Skeleton.jsx for use in this file
 function Sk({ className = '', style }) {
-  return <div className={clsx('dm-sk rounded', className)} style={style}/>;
+  return <div className={clsx('sk rounded', className)} style={style}/>;
 }
 
 function EquipmentImage({ typeId, imageUrl, typeName, className = '', contain = false }) {
@@ -2037,12 +2038,7 @@ export default function DispatchManagePage() {
         @keyframes dmSlideUp      { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
         @keyframes dmBulkBarSlide { from { opacity: 0; transform: translate(-50%, 20px) scale(0.94) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
         @keyframes dmPopIn        { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
-        @keyframes dmShimmer      { 0% { background-position: -600px 0 } 100% { background-position: 600px 0 } }
-        .dm-sk {
-          background: linear-gradient(90deg, #e2e8f0 25%, #eef2f7 50%, #e2e8f0 75%);
-          background-size: 1200px 100%;
-          animation: dmShimmer 1.6s ease-in-out infinite;
-        }
+        /* .sk shimmer is now in global index.css */
       `}</style>
     </div>
   );

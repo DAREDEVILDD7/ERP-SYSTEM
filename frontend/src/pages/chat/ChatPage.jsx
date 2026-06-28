@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { getChatThreads, getChatMessages, sendMessage } from '../../api/chat';
 import { getQuotation } from '../../api/quotations';
 import { getRequirement } from '../../api/requirements';
 import { useAuth } from '../../context/AuthContext';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonChatThreads, SkeletonChatMessages, SkeletonPreviewCard } from '../../components/common/Skeleton';
+import { useNotifications } from '../../context/NotificationContext';
 import StatusBadge from '../../components/common/StatusBadge';
 import ChatInputWithMentions from '../../components/chat/ChatInputWithMentions';
 import { MessageSquare, Search, X, FileText, ClipboardList } from 'lucide-react';
@@ -14,6 +16,8 @@ import clsx from 'clsx';
 
 export default function ChatPage() {
   const { profile } = useAuth();
+  const location = useLocation();
+  const { notifications, markChatThreadRead } = useNotifications();
   const [threads,       setThreads]       = useState([]);
   const [activeReq,     setActiveReq]     = useState(null);
   const [messages,      setMessages]      = useState([]);
@@ -28,6 +32,48 @@ export default function ChatPage() {
   const [previewReq,       setPreviewReq]       = useState(null);
   const [previewLoading,   setPreviewLoading]   = useState(false);
   const bottomRef = useRef(null);
+
+  // Deep-link: open a specific thread from a notification.
+  // pendingIdRef stores the target until threads have loaded.
+  // The location.key effect fires on EVERY navigation to /chat — covering both
+  // fresh mounts and re-navigation when the user is already on this page.
+  const pendingIdRef = useRef(null);
+
+  // Per-thread unread counts from notification state
+  const unreadByThread = notifications.reduce((acc, n) => {
+    if (n.type === 'chat' && !n.is_read && n.metadata?.requirement_id) {
+      const rid = n.metadata.requirement_id;
+      acc[rid] = (acc[rid] || 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const handleSelectThread = useCallback((reqId) => {
+    setActiveReq(reqId);
+    if (markChatThreadRead) markChatThreadRead(reqId);
+  }, [markChatThreadRead]);
+
+  // Fires on every navigation to /chat (location.key changes each time).
+  // If threads are already loaded → open immediately; otherwise queue in ref.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const id = location.state?.openId;
+    if (!id) return;
+    window.history.replaceState({}, '');           // clear state so back-nav doesn't re-trigger
+    if (!loading && threads.length > 0) {
+      handleSelectThread(id);
+    } else {
+      pendingIdRef.current = id;                   // pick up once threads load
+    }
+  }, [location.key]);                              // location.key = unique per navigation event
+
+  // Once threads load, drain the pending queue
+  useEffect(() => {
+    if (!pendingIdRef.current || loading || threads.length === 0) return;
+    const id = pendingIdRef.current;
+    pendingIdRef.current = null;
+    handleSelectThread(id);
+  }, [threads, loading, handleSelectThread]);
 
   const loadThreads = useCallback(async () => {
     try {
@@ -125,30 +171,47 @@ export default function ChatPage() {
 
         <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
           {loading ? (
-            <LoadingSpinner fullscreen={false} />
+            <SkeletonChatThreads count={7} />
           ) : filteredThreads.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-400">
               <MessageSquare size={32} className="opacity-30 mb-2" />
               <p className="text-sm">No chat threads yet</p>
             </div>
-          ) : filteredThreads.map(t => (
-            <button
-              key={t.related_requirement}
-              onClick={() => setActiveReq(t.related_requirement)}
-              className={clsx(
-                'w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors',
-                activeReq === t.related_requirement && 'bg-primary-50'
-              )}
-            >
-              <p className={clsx('text-sm font-medium truncate', activeReq === t.related_requirement ? 'text-primary-700' : 'text-gray-800')}>
-                {t.requirements?.customers?.company_name ?? 'Unknown'}
-              </p>
-              <p className="text-xs text-gray-400 truncate mt-0.5">
-                {t.requirements?.requirement_summary}
-              </p>
-              <p className="text-xs text-gray-300 mt-0.5 font-mono">{t.related_requirement}</p>
-            </button>
-          ))}
+          ) : filteredThreads.map(t => {
+            const threadUnread = unreadByThread[t.related_requirement] || 0;
+            return (
+              <button
+                key={t.related_requirement}
+                onClick={() => handleSelectThread(t.related_requirement)}
+                className={clsx(
+                  'w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors',
+                  activeReq === t.related_requirement && 'bg-primary-50',
+                  threadUnread > 0 && activeReq !== t.related_requirement && 'bg-rose-50/40'
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className={clsx(
+                      'text-sm truncate',
+                      activeReq === t.related_requirement ? 'text-primary-700 font-medium' :
+                      threadUnread > 0 ? 'text-gray-900 font-semibold' : 'text-gray-800 font-medium'
+                    )}>
+                      {t.requirements?.customers?.company_name ?? 'Unknown'}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">
+                      {t.requirements?.requirement_summary}
+                    </p>
+                    <p className="text-xs text-gray-300 mt-0.5 font-mono">{t.related_requirement}</p>
+                  </div>
+                  {threadUnread > 0 && activeReq !== t.related_requirement && (
+                    <span className="shrink-0 mt-0.5 min-w-[18px] h-[18px] bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 leading-none">
+                      {threadUnread > 99 ? '99+' : threadUnread}
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -182,7 +245,7 @@ export default function ChatPage() {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
               {msgLoading ? (
-                <LoadingSpinner fullscreen={false} />
+                <SkeletonChatMessages count={7} />
               ) : messages.length === 0 ? (
                 <div className="text-center text-gray-400 text-sm py-8">No messages yet. Start the conversation.</div>
               ) : messages.map(m => {
@@ -233,7 +296,7 @@ export default function ChatPage() {
                 className="text-gray-400 hover:text-gray-600 p-1"><X size={20}/></button>
             </div>
             {previewLoading ? (
-              <div className="p-8 flex justify-center"><LoadingSpinner fullscreen={false}/></div>
+              <SkeletonPreviewCard />
             ) : !previewQuote ? (
               <p className="text-gray-400 text-sm text-center p-8">Loading…</p>
             ) : (
@@ -278,7 +341,7 @@ export default function ChatPage() {
                 className="text-gray-400 hover:text-gray-600 p-1"><X size={20}/></button>
             </div>
             {previewLoading ? (
-              <div className="p-8 flex justify-center"><LoadingSpinner fullscreen={false}/></div>
+              <SkeletonPreviewCard />
             ) : !previewReq ? (
               <p className="text-gray-400 text-sm text-center p-8">Loading…</p>
             ) : (

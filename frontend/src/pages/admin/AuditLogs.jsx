@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { getSessionLogs } from '../../api/sessionLogs';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
+import { SkeletonTable, SkeletonStatCards } from '../../components/common/Skeleton';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -211,7 +212,8 @@ export default function AuditLogs() {
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {loading && <SkeletonStatCards count={4} />}
+        <div className={loading ? 'hidden' : 'grid grid-cols-2 lg:grid-cols-4 gap-3'}>
           {[
             {
               label: "Today's Logins", value: stats.todayCount,
@@ -316,12 +318,7 @@ export default function AuditLogs() {
 
         {/* Table / Cards */}
         {loading ? (
-          <div className="card p-12 flex items-center justify-center sl-fade">
-            <div className="flex flex-col items-center gap-3">
-              <RefreshCw size={24} className="text-indigo-400 animate-spin"/>
-              <p className="text-sm text-gray-400">Loading session logs…</p>
-            </div>
-          </div>
+          <SkeletonTable rows={8} colWidths={[140, 100, 110, 100, 100, 80, 70, 110]} />
         ) : filtered.length === 0 ? (
           <div className="card p-12 text-center sl-up">
             <AlertCircle size={36} className="mx-auto text-gray-200 mb-3"/>

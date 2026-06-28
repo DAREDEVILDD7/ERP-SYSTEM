@@ -5,6 +5,8 @@ import {
   getNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  markNotificationsByTypeRead,
+  markChatThreadNotificationsRead,
   deleteNotification,
   deleteAllNotifications,
 } from '../api/notifications';
@@ -193,6 +195,28 @@ export function NotificationProvider({ children }) {
     catch (err) { console.error('[Notifications] clearAll error:', err?.message); }
   }, [profile?.user_id]);
 
+  const markChatThreadRead = useCallback(async (requirementId) => {
+    if (!profile?.user_id || !requirementId) return;
+    setNotifications(prev =>
+      prev.map(n =>
+        n.type === 'chat' && !n.is_read && n.metadata?.requirement_id === requirementId
+          ? { ...n, is_read: true }
+          : n
+      )
+    );
+    try { await markChatThreadNotificationsRead(profile.user_id, requirementId); }
+    catch (err) { console.error('[Notifications] markChatThreadRead error:', err?.message); }
+  }, [profile?.user_id]);
+
+  const markAllByTypeRead = useCallback(async (type) => {
+    if (!profile?.user_id) return;
+    setNotifications(prev =>
+      prev.map(n => n.type === type ? { ...n, is_read: true } : n)
+    );
+    try { await markNotificationsByTypeRead(profile.user_id, type); }
+    catch (err) { console.error('[Notifications] markAllByTypeRead error:', err?.message); }
+  }, [profile?.user_id]);
+
   const dismissBanner = useCallback(() => {
     clearTimeout(bannerTimer.current);
     bannerQueue.current = [];          // clear pending queue so user isn't spammed
@@ -203,7 +227,8 @@ export function NotificationProvider({ children }) {
   return (
     <NotificationContext.Provider value={{
       notifications, unreadCount, loading, newNotif,
-      markRead, markAllRead, removeNotif, clearAll, dismissBanner, reload: load,
+      markRead, markAllRead, markAllByTypeRead, markChatThreadRead,
+      removeNotif, clearAll, dismissBanner, reload: load,
     }}>
       {children}
     </NotificationContext.Provider>

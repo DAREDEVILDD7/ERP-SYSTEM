@@ -10,7 +10,7 @@ import {
   PieChart, Pie, Legend, Label,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
-import LoadingSpinner from '../common/LoadingSpinner';
+import { SkeletonDashboard } from '../common/Skeleton';
 import { useAuth } from '../../context/AuthContext';
 import { fetchITStats } from '../../api/dashboard';
 import { ActivePieShape, Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
@@ -117,7 +117,7 @@ export default function ITHeadDashboard() {
   const realtimeLoad = useCallback(() => load(true), [load]);
   useRealtimeRefresh(TABLES, realtimeLoad);
 
-  if (loading) return <LoadingSpinner fullscreen={false} />;
+  if (loading) return <SkeletonDashboard statCount={4} />;
 
   if (error) return (
     <div className="neo-card p-10 text-center it-fade">

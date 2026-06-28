@@ -17,7 +17,7 @@ import { useAuth } from "../../context/AuthContext";
 import { hasPermission } from "../../lib/rolePermissions";
 import { useAppStore } from "../../store/useAppStore";
 import StatusBadge from "../../components/common/StatusBadge";
-import LoadingSpinner from "../../components/common/LoadingSpinner";
+import { SkeletonTable } from "../../components/common/Skeleton";
 import EmptyState from "../../components/common/EmptyState";
 import {
   Plus,
@@ -671,7 +671,7 @@ export default function EquipmentPage() {
       )}
 
       {loading ? (
-        <LoadingSpinner fullscreen={false} />
+        <SkeletonTable rows={8} colWidths={[70, 120, 100, 80, 90, 80, 80, 90, 75, 70]} />
       ) : displayedUnits.length === 0 ? (
         <EmptyState
           message={

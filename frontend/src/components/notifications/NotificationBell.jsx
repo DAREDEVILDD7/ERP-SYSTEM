@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Bell, X, CheckCheck, Trash2, Inbox, Loader2,
   FileText, FileCheck, Truck, Wrench, DollarSign,
-  ShoppingCart, Package, User, Info,
+  ShoppingCart, Package, User, Info, MessageSquare,
 } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useNotifications } from '../../context/NotificationContext';
@@ -19,6 +19,7 @@ const TYPE_CFG = {
   equipment:    { color: '#f59e0b', bg: 'bg-amber-50',   Icon: Package     },
   system:       { color: '#6b7280', bg: 'bg-gray-50',    Icon: Info        },
   user:         { color: '#f43f5e', bg: 'bg-rose-50',    Icon: User        },
+  chat:         { color: '#06b6d4', bg: 'bg-cyan-50',    Icon: MessageSquare },
 };
 const DEF_CFG = TYPE_CFG.system;
 
@@ -38,7 +39,7 @@ function BannerPreview({ notif, onDismiss, flyAway, onNavigate, onRead }) {
   const handleClick = () => {
     if (!notif.is_read && onRead) onRead(notif.notification_id);
     if (notif.link && onNavigate) {
-      const openId = notif.metadata?.open_id;
+      const openId = notif.metadata?.open_id ?? notif.metadata?.requirement_id;
       onNavigate(notif.link, openId ? { state: { openId } } : undefined);
     }
     onDismiss();
@@ -88,7 +89,7 @@ function NotifRow({ notif, onRead, onDelete, onNavigate, onClose, delay }) {
   const handleClick = () => {
     if (!notif.is_read) onRead(notif.notification_id);
     if (notif.link) {
-      const openId = notif.metadata?.open_id;
+      const openId = notif.metadata?.open_id ?? notif.metadata?.requirement_id;
       onNavigate(notif.link, openId ? { state: { openId } } : undefined);
       onClose();
     }

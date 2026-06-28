@@ -4,7 +4,7 @@ import { getInvoices, createInvoice, updateInvoice, getPendingQuotations, getLea
 import { getPurchaseOrders } from '../../api/procurement';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import {
   Plus, DollarSign, X, Loader2, RefreshCw,
@@ -366,7 +366,7 @@ export default function InvoicesPage() {
         ))}
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false} /> : (
+      {loading ? <SkeletonTable rows={8} colWidths={[80, 140, 90, 90, 90, 90, 80, 70]} /> : (
         <>
           {/* ── Customer Invoices ── */}
 {finTab === 'Customer Invoices' && (

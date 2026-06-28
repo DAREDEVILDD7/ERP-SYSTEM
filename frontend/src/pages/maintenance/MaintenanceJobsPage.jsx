@@ -9,7 +9,7 @@ import { getUsers } from '../../api/users';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import {
   Plus, Wrench, X, Loader2, RefreshCw,
@@ -173,7 +173,7 @@ export default function MaintenanceJobsPage() {
         </div>
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false}/> : jobs.length === 0 ? (
+      {loading ? <SkeletonTable rows={7} colWidths={[30, 80, 110, 150, 80, 90, 90, 90, 80, 100, 80, 70]} /> : jobs.length === 0 ? (
         <EmptyState message="No maintenance jobs" icon={Wrench}/>
       ) : (
         <>

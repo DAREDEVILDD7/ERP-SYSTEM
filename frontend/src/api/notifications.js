@@ -28,6 +28,27 @@ export async function markAllNotificationsRead(userId) {
   if (error) throw error;
 }
 
+export async function markChatThreadNotificationsRead(userId, requirementId) {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', userId)
+    .eq('type', 'chat')
+    .eq('is_read', false)
+    .filter('metadata->>requirement_id', 'eq', requirementId);
+  if (error) throw error;
+}
+
+export async function markNotificationsByTypeRead(userId, type) {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ is_read: true })
+    .eq('user_id', userId)
+    .eq('type', type)
+    .eq('is_read', false);
+  if (error) throw error;
+}
+
 export async function deleteNotification(notifId) {
   const { error } = await supabase
     .from('notifications')

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getUsers, updateUser } from '../../api/users';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import StatusBadge from '../../components/common/StatusBadge';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import { X, Loader2, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -54,7 +54,7 @@ export default function UserManagement() {
         <button onClick={load} className="btn-secondary p-2"><RefreshCw size={16} /></button>
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false} /> : (
+      {loading ? <SkeletonTable rows={8} colWidths={[90, 120, 100, 100, 110, 70, 70]} /> : (
         <>
           <div className="card hidden md:block overflow-hidden">
             <table className="w-full text-sm">

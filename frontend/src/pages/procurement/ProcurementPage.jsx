@@ -11,7 +11,7 @@ import { getEquipmentTypes, createEquipmentType } from '../../api/equipment';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import { downloadPurchaseOrderPDF } from '../../lib/pdfGenerator';
 import {
@@ -1190,7 +1190,7 @@ export default function ProcurementPage() {
         ))}
       </div>
 
-      {loading ? <LoadingSpinner fullscreen={false}/> : (
+      {loading ? <SkeletonTable rows={8} colWidths={[80, 160, 90, 130, 90, 90, 70, 80, 70]} /> : (
         <>
           {/* ── Requests Tab ── */}
           {tab === 'Requests' && (

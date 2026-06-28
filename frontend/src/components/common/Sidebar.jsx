@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
+import { useNotifications } from "../../context/NotificationContext";
 
 const NAV_ITEMS = [
   {
@@ -70,6 +71,8 @@ export default function Sidebar() {
   const { profile, role, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const { notifications } = useNotifications();
+  const unreadChatCount = notifications.filter(n => n.type === 'chat' && !n.is_read).length;
 
   const handleLogout = async () => {
     await logout();
@@ -116,8 +119,20 @@ export default function Sidebar() {
               )
             }
           >
-            <item.icon size={18} className="shrink-0" />
+            {/* Icon — with dot indicator when collapsed and there are unread chat messages */}
+            <div className="relative shrink-0">
+              <item.icon size={18} />
+              {item.key === 'chat' && collapsed && unreadChatCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full ring-1 ring-white" />
+              )}
+            </div>
             {!collapsed && <span className="truncate">{item.label}</span>}
+            {/* Count badge — only shown when expanded */}
+            {!collapsed && item.key === 'chat' && unreadChatCount > 0 && (
+              <span className="ml-auto text-[10px] font-bold bg-rose-500 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 leading-none shrink-0">
+                {unreadChatCount > 99 ? '99+' : unreadChatCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

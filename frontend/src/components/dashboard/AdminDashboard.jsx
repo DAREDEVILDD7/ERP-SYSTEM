@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { fetchAdminStats } from '../../api/dashboard';
 import { useAuth } from '../../context/AuthContext';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
-import LoadingSpinner from '../common/LoadingSpinner';
+import { SkeletonDashboard } from '../common/Skeleton';
 import StatusBadge from '../common/StatusBadge';
 import {
   Package, ClipboardList, FileText, Truck, DollarSign,
@@ -48,7 +48,7 @@ export default function AdminDashboard() {
   const realtimeLoad = useCallback(() => load(true), [load]);
   useRealtimeRefresh(TABLES, realtimeLoad);
 
-  if (loading) return <LoadingSpinner fullscreen={false} />;
+  if (loading) return <SkeletonDashboard statCount={4} />;
 
   if (error && !data) return (
     <div className="neo-card p-10 text-center ad-fade">

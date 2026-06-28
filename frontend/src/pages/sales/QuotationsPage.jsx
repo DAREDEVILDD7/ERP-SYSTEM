@@ -6,6 +6,7 @@ import { hasPermission } from "../../lib/rolePermissions";
 import { useAppStore } from "../../store/useAppStore";
 import StatusBadge from "../../components/common/StatusBadge";
 import LoadingSpinner from "../../components/common/LoadingSpinner";
+import { SkeletonTable } from "../../components/common/Skeleton";
 import EmptyState from "../../components/common/EmptyState";
 import QuotationForm from "../../components/quotations/QuotationForm";
 import QuotationDetail from "../../components/quotations/QuotationDetail";
@@ -414,7 +415,7 @@ export default function QuotationsPage() {
       )}
 
       {loading ? (
-        <LoadingSpinner fullscreen={false} />
+        <SkeletonTable rows={8} colWidths={[80, 140, 110, 80, 80, 70, 90, 75, 90]} />
       ) : filtered.length === 0 ? (
         <EmptyState message="No quotations found" icon={FileText} />
       ) : (
