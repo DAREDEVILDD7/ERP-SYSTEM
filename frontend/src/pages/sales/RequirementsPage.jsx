@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { getRequirements } from '../../api/requirements';
 import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
@@ -37,6 +38,7 @@ function FilterPill({ label, onRemove }) {
 
 export default function RequirementsPage() {
   const { profile, role, loading: authLoading } = useAuth();
+  const location = useLocation();
 
   const {
     requirements, requirementsLoaded, requirementsFilters,
@@ -83,6 +85,13 @@ export default function RequirementsPage() {
   }, [profile?.user_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (location.state?.openId) {
+      setSelected(location.state.openId);
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const ch = supabase.channel('requirements-realtime')

@@ -85,6 +85,9 @@ export default function QuotationsPage() {
       setPrefilledReq({ requirement_id: location.state.requirementId });
       setShowForm(true);
       window.history.replaceState({}, "");
+    } else if (location.state?.openId) {
+      setSelected(location.state.openId);
+      window.history.replaceState({}, "");
     }
   }, [location.state]);
 

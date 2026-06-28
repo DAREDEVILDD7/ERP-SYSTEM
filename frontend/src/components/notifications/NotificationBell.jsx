@@ -32,15 +32,27 @@ function timeAgo(ts) {
 }
 
 // ── Banner preview (slides in, then flies into bell) ────────────────────────
-function BannerPreview({ notif, onDismiss, flyAway }) {
+function BannerPreview({ notif, onDismiss, flyAway, onNavigate, onRead }) {
   const { color, bg, Icon } = TYPE_CFG[notif?.type] ?? DEF_CFG;
+
+  const handleClick = () => {
+    if (!notif.is_read && onRead) onRead(notif.notification_id);
+    if (notif.link && onNavigate) {
+      const openId = notif.metadata?.open_id;
+      onNavigate(notif.link, openId ? { state: { openId } } : undefined);
+    }
+    onDismiss();
+  };
+
   return (
     <div
       className={`relative ${flyAway ? 'nb-fly' : 'nb-banner'}`}
       style={{ pointerEvents: flyAway ? 'none' : 'auto' }}>
       <div
+        onClick={notif.link ? handleClick : undefined}
         className={`flex items-start gap-3 p-3 pr-8 bg-white rounded-xl shadow-2xl
-          border border-gray-100 w-64`}
+          border border-gray-100 w-64
+          ${notif.link ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
         style={{ borderLeftWidth: 3, borderLeftColor: color }}>
         <div className={`w-7 h-7 rounded-lg ${bg} flex items-center justify-center shrink-0 mt-0.5`}>
           <Icon size={13} style={{ color }} />
@@ -53,10 +65,13 @@ function BannerPreview({ notif, onDismiss, flyAway }) {
             style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
             {notif.message}
           </p>
+          {notif.link && (
+            <p className="text-[10px] mt-1 font-medium" style={{ color }}>Tap to open →</p>
+          )}
         </div>
       </div>
       <button
-        onClick={onDismiss}
+        onClick={e => { e.stopPropagation(); onDismiss(); }}
         className="absolute top-2 right-2 w-5 h-5 rounded-full flex items-center justify-center
           text-gray-300 hover:text-gray-500 hover:bg-gray-100 transition-colors">
         <X size={11} />
@@ -72,7 +87,11 @@ function NotifRow({ notif, onRead, onDelete, onNavigate, onClose, delay }) {
 
   const handleClick = () => {
     if (!notif.is_read) onRead(notif.notification_id);
-    if (notif.link) { onNavigate(notif.link); onClose(); }
+    if (notif.link) {
+      const openId = notif.metadata?.open_id;
+      onNavigate(notif.link, openId ? { state: { openId } } : undefined);
+      onClose();
+    }
   };
 
   return (
@@ -230,6 +249,8 @@ export default function NotificationBell() {
               notif={newNotif}
               onDismiss={dismissBanner}
               flyAway={flyAway}
+              onNavigate={navigate}
+              onRead={markRead}
             />
           </div>
         )}

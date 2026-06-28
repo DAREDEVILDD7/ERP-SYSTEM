@@ -122,9 +122,9 @@ BEGIN
       ARRAY['Operations Manager', 'Admin'],
       'requirement',
       'New Requirement Submitted',
-      COALESCE(NEW.requirement_summary, 'A new requirement has been submitted.'),
+      '[' || NEW.requirement_id || '] ' || COALESCE(NEW.requirement_summary, 'A new requirement has been submitted.'),
       '/requirements',
-      '{}',
+      jsonb_build_object('open_id', NEW.requirement_id),
       v_creator   -- exclude the creator so they don't notify themselves
     );
 
@@ -132,21 +132,41 @@ BEGIN
     IF NEW.status = 'Approved' THEN
       PERFORM notify_user(
         v_creator, 'requirement', 'Requirement Approved',
-        'Your requirement "' || COALESCE(NEW.requirement_summary,'') || '" has been approved.',
-        '/requirements'
+        '[' || NEW.requirement_id || '] "' || COALESCE(NEW.requirement_summary,'') || '" has been approved.',
+        '/requirements',
+        jsonb_build_object('open_id', NEW.requirement_id)
       );
     ELSIF NEW.status = 'Rejected' THEN
       PERFORM notify_user(
         v_creator, 'requirement', 'Requirement Rejected',
-        'Your requirement "' || COALESCE(NEW.requirement_summary,'') || '" was not approved.',
-        '/requirements'
+        '[' || NEW.requirement_id || '] "' || COALESCE(NEW.requirement_summary,'') || '" was not approved.',
+        '/requirements',
+        jsonb_build_object('open_id', NEW.requirement_id)
       );
-    ELSIF NEW.status IN ('Operations Review', 'Pending Review') THEN
+    ELSIF NEW.status = 'Operations Review' THEN
+      -- Operations manager has marked the review done — notify Sales + Admin
+      PERFORM notify_by_roles(
+        ARRAY['Sales Executive'],
+        'requirement', 'Operations Review Complete',
+        '[' || NEW.requirement_id || '] "' || COALESCE(NEW.requirement_summary,'') || '" has passed operations review. Please prepare a quotation.',
+        '/requirements',
+        jsonb_build_object('open_id', NEW.requirement_id)
+      );
+      PERFORM notify_by_roles(
+        ARRAY['Admin'],
+        'requirement', 'Operations Review Complete',
+        '[' || NEW.requirement_id || '] "' || COALESCE(NEW.requirement_summary,'') || '" has passed operations review.',
+        '/requirements',
+        jsonb_build_object('open_id', NEW.requirement_id)
+      );
+    ELSIF NEW.status = 'Pending Review' THEN
+      -- Requirement sent back to pending — notify Operations Manager
       PERFORM notify_by_roles(
         ARRAY['Operations Manager'],
         'requirement', 'Requirement Needs Your Review',
-        '"' || COALESCE(NEW.requirement_summary,'') || '" is awaiting operations review.',
-        '/requirements'
+        '[' || NEW.requirement_id || '] "' || COALESCE(NEW.requirement_summary,'') || '" is awaiting operations review.',
+        '/requirements',
+        jsonb_build_object('open_id', NEW.requirement_id)
       );
     END IF;
   END IF;
@@ -176,10 +196,12 @@ BEGIN
 
   IF TG_OP = 'INSERT' THEN
     PERFORM notify_by_roles(
-      ARRAY['Finance Officer', 'Admin'],
+      ARRAY['Sales Executive', 'Finance Officer', 'Operations Manager', 'Admin'],
       'quotation', 'New Quotation Created',
-      'A new quotation has been created and requires attention.',
-      '/quotations', '{}', v_creator
+      '[' || NEW.quotation_id || '] A new quotation has been created and requires attention.',
+      '/quotations',
+      jsonb_build_object('open_id', NEW.quotation_id),
+      v_creator
     );
 
   ELSIF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
@@ -187,42 +209,49 @@ BEGIN
       -- Notify the person who prepared the quotation
       PERFORM notify_user(
         v_creator, 'quotation', 'Quotation Approved',
-        'Your quotation has been approved. Equipment dispatch can proceed.',
-        '/quotations'
+        '[' || NEW.quotation_id || '] Your quotation has been approved. Equipment dispatch can proceed.',
+        '/quotations',
+        jsonb_build_object('open_id', NEW.quotation_id)
       );
       -- Notify Operations Manager — they need to coordinate the dispatch
       PERFORM notify_by_roles(
         ARRAY['Operations Manager'],
         'quotation', 'Quotation Approved — Dispatch Required',
-        'A quotation has been approved. Equipment is ready to be dispatched.',
-        '/dispatch'
+        '[' || NEW.quotation_id || '] A quotation has been approved. Equipment is ready to be dispatched.',
+        '/dispatch',
+        jsonb_build_object('open_id', NEW.quotation_id)
       );
       -- Notify Dispatch Coordinator — they create the actual dispatch orders
       PERFORM notify_by_roles(
         ARRAY['Dispatch Coordinator'],
         'quotation', 'New Dispatch Order Needed',
-        'A quotation has been approved. Please create the dispatch order.',
-        '/dispatch'
+        '[' || NEW.quotation_id || '] A quotation has been approved. Please create the dispatch order.',
+        '/dispatch',
+        jsonb_build_object('open_id', NEW.quotation_id)
       );
       -- Notify Finance Officer — may need to raise an invoice
       PERFORM notify_by_roles(
         ARRAY['Finance Officer'],
         'quotation', 'Quotation Approved — Invoice Pending',
-        'An approved quotation is ready for invoicing.',
-        '/finance'
+        '[' || NEW.quotation_id || '] An approved quotation is ready for invoicing.',
+        '/finance',
+        jsonb_build_object('open_id', NEW.quotation_id)
       );
     ELSIF NEW.status = 'Rejected' THEN
       PERFORM notify_user(
         v_creator, 'quotation', 'Quotation Rejected',
-        'Your quotation has been rejected. Please review and revise if needed.',
-        '/quotations'
+        '[' || NEW.quotation_id || '] Your quotation has been rejected. Please review and revise if needed.',
+        '/quotations',
+        jsonb_build_object('open_id', NEW.quotation_id)
       );
     ELSIF NEW.status = 'Sent' THEN
       PERFORM notify_by_roles(
         ARRAY['Finance Officer', 'Admin'],
         'quotation', 'Quotation Sent to Customer',
-        'A quotation has been sent to the customer and is awaiting their response.',
-        '/quotations', '{}', v_creator
+        '[' || NEW.quotation_id || '] A quotation has been sent to the customer and is awaiting their response.',
+        '/quotations',
+        jsonb_build_object('open_id', NEW.quotation_id),
+        v_creator
       );
     END IF;
   END IF;
@@ -245,8 +274,9 @@ BEGIN
     PERFORM notify_by_roles(
       ARRAY['Dispatch Coordinator', 'Operations Manager'],
       'dispatch', 'New Dispatch Created',
-      'A new dispatch order has been created and requires action.',
-      '/dispatch'
+      '[' || NEW.dispatch_id || '] A new dispatch order has been created and requires action.',
+      '/dispatch',
+      jsonb_build_object('open_id', NEW.dispatch_id)
     );
 
   ELSIF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
@@ -254,22 +284,25 @@ BEGIN
       PERFORM notify_by_roles(
         ARRAY['Operations Manager', 'Admin'],
         'dispatch', 'Dispatch In Transit',
-        'A dispatch is now in transit to the destination.',
-        '/dispatch'
+        '[' || NEW.dispatch_id || '] A dispatch is now in transit to the destination.',
+        '/dispatch',
+        jsonb_build_object('open_id', NEW.dispatch_id)
       );
     ELSIF NEW.status = 'Completed' THEN
       PERFORM notify_by_roles(
         ARRAY['Operations Manager', 'Finance Officer', 'Admin'],
         'dispatch', 'Dispatch Completed',
-        'A dispatch has been completed successfully.',
-        '/dispatch'
+        '[' || NEW.dispatch_id || '] A dispatch has been completed successfully.',
+        '/dispatch',
+        jsonb_build_object('open_id', NEW.dispatch_id)
       );
     ELSIF NEW.status = 'Assigned' THEN
       PERFORM notify_by_roles(
         ARRAY['Dispatch Coordinator'],
         'dispatch', 'Dispatch Assigned',
-        'A pending dispatch has been assigned and is ready to proceed.',
-        '/dispatch'
+        '[' || NEW.dispatch_id || '] A pending dispatch has been assigned and is ready to proceed.',
+        '/dispatch',
+        jsonb_build_object('open_id', NEW.dispatch_id)
       );
     END IF;
   END IF;
@@ -292,16 +325,18 @@ BEGIN
     PERFORM notify_by_roles(
       ARRAY['Maintenance Engineer', 'Operations Manager'],
       'maintenance', 'New Maintenance Job',
-      'New job logged: ' || COALESCE(NEW.issue, 'maintenance required'),
-      '/maintenance'
+      '[' || NEW.maintenance_id || '] ' || COALESCE(NEW.issue, 'maintenance required'),
+      '/maintenance',
+      jsonb_build_object('open_id', NEW.maintenance_id)
     );
     -- Also notify the specifically assigned engineer
     IF NEW.assigned_to IS NOT NULL THEN
       PERFORM notify_user(
         NEW.assigned_to::TEXT, 'maintenance',
         'Maintenance Job Assigned to You',
-        'You have been assigned: ' || COALESCE(NEW.issue, 'a maintenance job'),
-        '/maintenance'
+        '[' || NEW.maintenance_id || '] You have been assigned: ' || COALESCE(NEW.issue, 'a maintenance job'),
+        '/maintenance',
+        jsonb_build_object('open_id', NEW.maintenance_id)
       );
     END IF;
 
@@ -310,15 +345,17 @@ BEGIN
       PERFORM notify_by_roles(
         ARRAY['Operations Manager', 'Warehouse Operator', 'Admin'],
         'maintenance', 'Maintenance Completed',
-        'Job completed: ' || COALESCE(NEW.issue, 'maintenance job'),
-        '/maintenance'
+        '[' || NEW.maintenance_id || '] Job completed: ' || COALESCE(NEW.issue, 'maintenance job'),
+        '/maintenance',
+        jsonb_build_object('open_id', NEW.maintenance_id)
       );
     ELSIF NEW.status = 'In Progress' THEN
       PERFORM notify_by_roles(
         ARRAY['Operations Manager'],
         'maintenance', 'Maintenance In Progress',
-        'Job in progress: ' || COALESCE(NEW.issue, 'maintenance job'),
-        '/maintenance'
+        '[' || NEW.maintenance_id || '] Job in progress: ' || COALESCE(NEW.issue, 'maintenance job'),
+        '/maintenance',
+        jsonb_build_object('open_id', NEW.maintenance_id)
       );
     END IF;
 
@@ -327,8 +364,9 @@ BEGIN
       PERFORM notify_user(
         NEW.assigned_to::TEXT, 'maintenance',
         'Maintenance Job Reassigned to You',
-        'You have been assigned: ' || COALESCE(NEW.issue, 'a maintenance job'),
-        '/maintenance'
+        '[' || NEW.maintenance_id || '] You have been assigned: ' || COALESCE(NEW.issue, 'a maintenance job'),
+        '/maintenance',
+        jsonb_build_object('open_id', NEW.maintenance_id)
       );
     END IF;
   END IF;

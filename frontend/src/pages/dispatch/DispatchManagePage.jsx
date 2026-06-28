@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import {
   getDispatchesFast, createDispatch, updateDispatch, cancelDispatch,
@@ -24,13 +25,27 @@ const STATUSES = ['All','Pending','Assigned','In Transit','Completed','Returned'
 const DISPATCH_TABLES = ['dispatches','dispatch_items','equipment_units'];
 
 const STATUS_COLORS = {
-  Pending:    'bg-yellow-50 text-yellow-700 border-yellow-200',
-  Assigned:   'bg-blue-50 text-blue-700 border-blue-200',
+  Pending:      'bg-yellow-50 text-yellow-700 border-yellow-200',
+  Assigned:     'bg-blue-50 text-blue-700 border-blue-200',
   'In Transit': 'bg-indigo-50 text-indigo-700 border-indigo-200',
-  Completed:  'bg-green-50 text-green-700 border-green-200',
-  Returned:   'bg-gray-50 text-gray-600 border-gray-200',
-  Cancelled:  'bg-red-50 text-red-600 border-red-200',
+  Completed:    'bg-green-50 text-green-700 border-green-200',
+  Returned:     'bg-gray-50 text-gray-600 border-gray-200',
+  Cancelled:    'bg-red-50 text-red-600 border-red-200',
 };
+
+// Left sidebar border colours per status — use inline style (avoids Tailwind JIT purge)
+const STATUS_SIDEBAR = {
+  Pending:      { color: '#fb923c', r: 251, g: 146, b: 60  },
+  Assigned:     { color: '#3b82f6', r: 59,  g: 130, b: 246 },
+  'In Transit': { color: '#6366f1', r: 99,  g: 102, b: 241 },
+  Completed:    { color: '#22c55e', r: 34,  g: 197, b: 94  },
+  Returned:     { color: '#9ca3af', r: 156, g: 163, b: 175 },
+  Cancelled:    { color: '#f87171', r: 248, g: 113, b: 113 },
+};
+
+function Sk({ className = '', style }) {
+  return <div className={clsx('dm-sk rounded', className)} style={style}/>;
+}
 
 function EquipmentImage({ typeId, imageUrl, typeName, className = '', contain = false }) {
   const [failed, setFailed] = useState(false);
@@ -65,6 +80,7 @@ function EquipmentImage({ typeId, imageUrl, typeName, className = '', contain = 
 
 export default function DispatchManagePage() {
   const { profile, role, loading: authLoading } = useAuth();
+  const location = useLocation();
 
   const [dispatches,   setDispatches]   = useState([]);
   const [quotations,   setQuotations]   = useState([]);
@@ -74,6 +90,8 @@ export default function DispatchManagePage() {
   const [expandedId,   setExpandedId]   = useState(null);
   const [previewQuote, setPreviewQuote] = useState(null);
   const [selectedDispatchId, setSelectedDispatchId] = useState(null);
+  const [showAllOngoing,    setShowAllOngoing]    = useState(false);
+  const [pageLoading,       setPageLoading]       = useState(true);
 
   // Search + filter state
   const [search,       setSearch]       = useState('');
@@ -129,8 +147,9 @@ export default function DispatchManagePage() {
 
   const canWrite = hasPermission(role, 'dispatch_create');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (authLoading || !profile || !role) return;
+    if (!silent) setPageLoading(true);
     try {
       const [d, q, e] = await Promise.all([
         getDispatchesFast(),
@@ -143,11 +162,21 @@ export default function DispatchManagePage() {
     } catch (err) {
       toast.error('Failed to load dispatch data');
       console.error(err);
+    } finally {
+      setPageLoading(false);
     }
   }, [authLoading, profile, role]);
 
   useEffect(() => { load(); }, [load]);
-  useRealtimeRefresh(DISPATCH_TABLES, load);
+  useRealtimeRefresh(DISPATCH_TABLES, () => load(true));
+
+  useEffect(() => {
+    if (location.state?.openId) {
+      setSelectedDispatchId(location.state.openId);
+      setExpandedId(location.state.openId);
+      window.history.replaceState({}, '');
+    }
+  }, [location.state]);
 
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filtered = dispatches.filter(d => {
@@ -697,41 +726,83 @@ export default function DispatchManagePage() {
 
       {/* Stats Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { label: 'Total dispatches:',    value: statsTotal,     icon: Package,     numColor: 'text-gray-800',   iconBg: 'bg-gray-100',   iconColor: 'text-gray-500'   },
-          { label: 'Pickup packages:',     value: statsActive,    icon: Truck,       numColor: 'text-blue-600',   iconBg: 'bg-blue-50',    iconColor: 'text-blue-400'   },
-          { label: 'Pending packages:',    value: statsPending,   icon: Clock,       numColor: 'text-orange-500', iconBg: 'bg-orange-50',  iconColor: 'text-orange-400' },
-          { label: 'Packages delivered:',  value: statsCompleted, icon: CheckCircle, numColor: 'text-green-600',  iconBg: 'bg-green-50',   iconColor: 'text-green-500'  },
-        ].map(({ label, value, icon: Icon, numColor, iconBg, iconColor }) => (
-          <div key={label} className="card p-4 flex items-center justify-between gap-2">
-            <div>
-              <p className="text-xs text-gray-400 mb-1">{label}</p>
-              <p className={clsx('text-3xl font-bold tabular-nums leading-none', numColor)}>{value}</p>
+        {pageLoading ? (
+          [0,1,2,3].map(i => (
+            <div key={i} className="card p-4 flex items-center justify-between gap-2">
+              <div className="space-y-2">
+                <Sk className="h-3 w-28"/>
+                <Sk className="h-8 w-12"/>
+              </div>
+              <Sk className="h-11 w-11 rounded-xl shrink-0"/>
             </div>
-            <div className={clsx('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', iconBg)}>
-              <Icon size={20} className={iconColor}/>
+          ))
+        ) : (
+          [
+            { label: 'Total dispatches:',    value: statsTotal,     icon: Package,     numColor: 'text-gray-800',   iconBg: 'bg-gray-100',   iconColor: 'text-gray-500'   },
+            { label: 'Pickup packages:',     value: statsActive,    icon: Truck,       numColor: 'text-blue-600',   iconBg: 'bg-blue-50',    iconColor: 'text-blue-400'   },
+            { label: 'Pending packages:',    value: statsPending,   icon: Clock,       numColor: 'text-orange-500', iconBg: 'bg-orange-50',  iconColor: 'text-orange-400' },
+            { label: 'Packages delivered:',  value: statsCompleted, icon: CheckCircle, numColor: 'text-green-600',  iconBg: 'bg-green-50',   iconColor: 'text-green-500'  },
+          ].map(({ label, value, icon: Icon, numColor, iconBg, iconColor }) => (
+            <div key={label} className="card p-4 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-xs text-gray-400 mb-1">{label}</p>
+                <p className={clsx('text-3xl font-bold tabular-nums leading-none', numColor)}>{value}</p>
+              </div>
+              <div className={clsx('w-11 h-11 rounded-xl flex items-center justify-center shrink-0', iconBg)}>
+                <Icon size={20} className={iconColor}/>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Ongoing Delivery */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
 
-        {/* Left: Ongoing dispatch list */}
-        <div className="lg:col-span-2 card overflow-hidden flex flex-col" style={{ minHeight: '460px' }}>
-          <div className="px-4 py-3 border-b border-gray-100 shrink-0">
+        {/* Left: Ongoing dispatch list — first 5 + expand, stretches to grid row height */}
+        <div className="lg:col-span-2 card overflow-hidden flex flex-col">
+          <div className="px-4 py-3 border-b border-gray-100 shrink-0 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">Ongoing Delivery</h3>
+            {!pageLoading && ongoingDispatches.length > 0 && (
+              <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
+                {ongoingDispatches.length}
+              </span>
+            )}
           </div>
-          <div className="overflow-y-auto flex-1">
-            {ongoingDispatches.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full py-12 text-center">
-                <Truck size={36} className="text-gray-200 mb-2"/>
-                <p className="text-sm text-gray-400">No active dispatches</p>
-              </div>
-            ) : (
+
+          {pageLoading ? (
+            <div className="divide-y divide-gray-100">
+              {[0,1,2,3,4].map(i => (
+                <div key={i} className="px-4 py-3.5 border-l-4 border-l-transparent">
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 space-y-2">
+                      <Sk className="h-2.5 w-16"/>
+                      <Sk className="h-4 w-36"/>
+                      <div className="flex gap-1.5">
+                        <Sk className="h-5 w-24 rounded-full"/>
+                        <Sk className="h-5 w-20 rounded-full"/>
+                        <Sk className="h-5 w-14 rounded-full"/>
+                      </div>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <Sk className="h-3 w-14"/>
+                        <Sk className="h-3 w-3"/>
+                        <Sk className="h-3 w-20"/>
+                      </div>
+                    </div>
+                    <Sk className="h-16 w-28 rounded-xl shrink-0"/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : ongoingDispatches.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-14 text-center">
+              <Truck size={36} className="text-gray-200 mb-2"/>
+              <p className="text-sm text-gray-400">No active dispatches</p>
+            </div>
+          ) : (
+            <>
               <div className="divide-y divide-gray-100">
-                {ongoingDispatches.map(d => {
+                {(showAllOngoing ? ongoingDispatches : ongoingDispatches.slice(0, 5)).map(d => {
                   const type  = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
                   const unit  = d.dispatch_items?.[0]?.equipment_units;
                   const isSel = sel?.dispatch_id === d.dispatch_id;
@@ -739,11 +810,20 @@ export default function DispatchManagePage() {
                     <button key={d.dispatch_id} type="button"
                       onClick={() => setSelectedDispatchId(d.dispatch_id)}
                       className={clsx(
-                        'w-full text-left px-4 py-3.5 hover:bg-gray-50 transition-colors',
-                        isSel && 'bg-blue-50 border-l-[3px] border-l-blue-500'
-                      )}>
+                        'w-full text-left px-4 py-3.5 border-l-4 transition-all duration-200',
+                        isSel ? '' : 'hover:bg-gray-50/80'
+                      )}
+                      style={(() => {
+                        const s = STATUS_SIDEBAR[d.status] ?? { color: '#d1d5db', r: 209, g: 213, b: 219 };
+                        return isSel ? {
+                          borderLeftColor: s.color,
+                          backgroundColor: `rgba(${s.r},${s.g},${s.b},0.07)`,
+                          boxShadow: `inset 0 0 0 1px rgba(${s.r},${s.g},${s.b},0.2), inset 0 0 28px rgba(${s.r},${s.g},${s.b},0.10)`,
+                        } : {
+                          borderLeftColor: 'transparent',
+                        };
+                      })()}>
                       <div className="flex items-start gap-3">
-                        {/* Left text */}
                         <div className="flex-1 min-w-0">
                           <p className="text-[11px] text-gray-400 mb-0.5">Dispatch ID:</p>
                           <p className="font-bold text-gray-900 text-sm leading-tight truncate">{d.dispatch_id}</p>
@@ -752,7 +832,7 @@ export default function DispatchManagePage() {
                               <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.name}{unit?.capacity ? ` · ${unit.capacity}` : ''}</span>
                             )}
                             {d.quotations?.customers?.company_name && (
-                              <span className="text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full truncate max-w-[100px]">{d.quotations.customers.company_name}</span>
+                              <span className="text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full truncate max-w-[110px]">{d.quotations.customers.company_name}</span>
                             )}
                             <StatusBadge status={d.status}/>
                           </div>
@@ -762,7 +842,6 @@ export default function DispatchManagePage() {
                             <span className="text-gray-700 font-medium truncate">🏢 {d.destination}</span>
                           </div>
                         </div>
-                        {/* Right image */}
                         <EquipmentImage
                           typeId={type?.type_id}
                           imageUrl={type?.image_url}
@@ -774,14 +853,77 @@ export default function DispatchManagePage() {
                   );
                 })}
               </div>
-            )}
-          </div>
+
+              {/* Expand / collapse button */}
+              {ongoingDispatches.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllOngoing(v => !v)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 border-t border-gray-100 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors">
+                  {showAllOngoing ? (
+                    <><ChevronUp size={14}/> Show less</>
+                  ) : (
+                    <><ChevronDown size={14}/> Show {ongoingDispatches.length - 5} more dispatch{ongoingDispatches.length - 5 !== 1 ? 'es' : ''}</>
+                  )}
+                </button>
+              )}
+            </>
+          )}
         </div>
 
-        {/* Right: Detail panel */}
-        <div className="lg:col-span-3 card overflow-hidden flex flex-col" style={{ minHeight: '460px' }}>
-          {!sel ? (
-            <div className="flex flex-col items-center justify-center h-full py-16">
+        {/* Right: Detail panel — stretches to match left panel height */}
+        <div className="lg:col-span-3 card overflow-hidden flex flex-col">
+          {pageLoading ? (
+            <>
+              {/* Header skeleton */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+                <div className="flex items-center gap-3">
+                  <Sk className="h-4 w-28"/>
+                  <Sk className="h-3 w-3 rounded-full"/>
+                  <Sk className="h-3 w-16"/>
+                </div>
+                <Sk className="h-5 w-5 rounded"/>
+              </div>
+              {/* Hero image skeleton */}
+              <Sk className="h-44 rounded-none shrink-0"/>
+              {/* Info strip skeleton */}
+              <div className="flex divide-x divide-gray-100 border-b border-gray-100 shrink-0">
+                {[0,1,2,3].map(i => (
+                  <div key={i} className="flex-1 px-4 py-3 space-y-2">
+                    <Sk className="h-2.5 w-12"/>
+                    <div className="flex items-center gap-2">
+                      {i === 0 && <Sk className="h-8 w-8 rounded-full shrink-0"/>}
+                      <div className="space-y-1.5 flex-1">
+                        <Sk className="h-3.5 w-20"/>
+                        <Sk className="h-2.5 w-14"/>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Timeline skeleton */}
+              <div className="px-5 py-4 border-b border-gray-100 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="text-center space-y-1.5">
+                    <Sk className="h-2.5 w-20 mx-auto"/>
+                    <Sk className="h-3 w-3 rounded-full mx-auto"/>
+                  </div>
+                  <Sk className="flex-1 h-1.5"/>
+                  <div className="text-center space-y-1.5">
+                    <Sk className="h-2.5 w-20 mx-auto"/>
+                    <Sk className="h-3 w-3 rounded-full mx-auto"/>
+                  </div>
+                </div>
+                <Sk className="h-2.5 w-48 mx-auto"/>
+              </div>
+              {/* Buttons skeleton */}
+              <div className="px-5 py-3 flex gap-2">
+                <Sk className="h-9 w-32 rounded-lg"/>
+                <Sk className="h-9 w-24 rounded-lg"/>
+              </div>
+            </>
+          ) : !sel ? (
+            <div className="flex flex-col items-center justify-center flex-1 py-20 text-center">
               <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center mb-3">
                 <Package size={28} className="text-gray-300"/>
               </div>
@@ -1011,7 +1153,55 @@ export default function DispatchManagePage() {
           )}
         </div>
 
-        {filtered.length === 0 ? (
+        {pageLoading ? (
+          <>
+            {/* Desktop table skeleton */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    {[40,100,120,140,120,100,120,90,80,80].map((w,i) => (
+                      <th key={i} className="px-4 py-3"><Sk className="h-3" style={{ width: w }}/></th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {[0,1,2,3,4,5,6,7].map(i => (
+                    <tr key={i}>
+                      <td className="px-4 py-3.5"><Sk className="h-4 w-4 rounded"/></td>
+                      <td className="px-4 py-3.5"><div className="flex items-center gap-2"><Sk className="h-9 w-9 rounded-lg shrink-0"/><div className="space-y-1.5"><Sk className="h-3 w-24"/><Sk className="h-2.5 w-16"/></div></div></td>
+                      <td className="px-4 py-3.5"><div className="space-y-1"><Sk className="h-3 w-32"/><Sk className="h-2.5 w-20"/></div></td>
+                      <td className="px-4 py-3.5"><Sk className="h-3 w-24"/></td>
+                      <td className="px-4 py-3.5"><Sk className="h-3 w-20"/></td>
+                      <td className="px-4 py-3.5"><Sk className="h-3 w-28"/></td>
+                      <td className="px-4 py-3.5"><div className="space-y-1.5"><Sk className="h-2.5 w-16"/><Sk className="h-2.5 w-16"/></div></td>
+                      <td className="px-4 py-3.5"><Sk className="h-4 w-16 rounded-full"/></td>
+                      <td className="px-4 py-3.5"><Sk className="h-4 w-16 rounded-full"/></td>
+                      <td className="px-4 py-3.5"><div className="flex gap-1"><Sk className="h-6 w-14 rounded-lg"/><Sk className="h-6 w-14 rounded-lg"/></div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* Mobile skeleton */}
+            <div className="md:hidden divide-y divide-gray-100">
+              {[0,1,2,3].map(i => (
+                <div key={i} className="p-4 flex gap-3">
+                  <Sk className="h-14 w-14 rounded-xl shrink-0"/>
+                  <div className="flex-1 space-y-2">
+                    <Sk className="h-2.5 w-20"/>
+                    <Sk className="h-4 w-32"/>
+                    <Sk className="h-3 w-40"/>
+                    <div className="flex gap-2 pt-1">
+                      <Sk className="h-7 w-24 rounded-lg"/>
+                      <Sk className="h-7 w-20 rounded-lg"/>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : filtered.length === 0 ? (
           <EmptyState message="No dispatches found" icon={Truck}/>
         ) : (
           <>
@@ -1843,10 +2033,16 @@ export default function DispatchManagePage() {
       )}
 
       <style>{`
-        @keyframes dmFadeIn      { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes dmSlideUp     { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes dmFadeIn       { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes dmSlideUp      { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
         @keyframes dmBulkBarSlide { from { opacity: 0; transform: translate(-50%, 20px) scale(0.94) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
-        @keyframes dmPopIn       { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
+        @keyframes dmPopIn        { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
+        @keyframes dmShimmer      { 0% { background-position: -600px 0 } 100% { background-position: 600px 0 } }
+        .dm-sk {
+          background: linear-gradient(90deg, #e2e8f0 25%, #eef2f7 50%, #e2e8f0 75%);
+          background-size: 1200px 100%;
+          animation: dmShimmer 1.6s ease-in-out infinite;
+        }
       `}</style>
     </div>
   );
