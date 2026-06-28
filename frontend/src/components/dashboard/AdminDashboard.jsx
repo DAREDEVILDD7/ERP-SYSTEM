@@ -6,7 +6,7 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import StatusBadge from '../common/StatusBadge';
 import {
   Package, ClipboardList, FileText, Truck, DollarSign,
-  Wrench, RefreshCw, AlertTriangle, ShieldCheck, TrendingUp,
+  RefreshCw, AlertTriangle, ShieldCheck, TrendingUp,
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
@@ -188,7 +188,7 @@ export default function AdminDashboard() {
               : (
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={requirementsByStatus} layout="vertical" margin={{ left: 20, right: 16 }}>
-                    <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
+                    <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} />
                     <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />

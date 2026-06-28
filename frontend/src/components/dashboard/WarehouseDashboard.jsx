@@ -162,7 +162,7 @@ export default function WarehouseDashboard() {
               : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={byType} layout="vertical" margin={{ left: 10, right: 20 }}>
-                    <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
+                    <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} />
                     <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />

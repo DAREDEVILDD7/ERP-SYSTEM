@@ -5,7 +5,17 @@
 
 @layer base {
   body {
-    @apply bg-surface text-gray-900 font-sans antialiased;
+    @apply text-gray-900 font-sans antialiased;
+    /* Aurora backdrop — multi-stop iridescent gradient, fixed so glass cards reveal it */
+    background:
+      radial-gradient(ellipse 120% 65% at 12%  4%,  rgba(139, 92, 246, 0.13) 0%, transparent 52%),
+      radial-gradient(ellipse 90%  65% at 88% 94%,  rgba(6,  182, 212, 0.11) 0%, transparent 52%),
+      radial-gradient(ellipse 70%  50% at 55% 52%,  rgba(236, 72, 153, 0.05) 0%, transparent 55%),
+      radial-gradient(ellipse 95%  45% at 28% 82%,  rgba(99, 102, 241, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 60%  40% at 72% 28%,  rgba(20, 184, 166, 0.06) 0%, transparent 50%),
+      #f2f4ff;
+    background-attachment: fixed;
+    min-height: 100vh;
   }
 }
 
@@ -32,76 +42,126 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* ── Neomorphism design system ───────────────────────────────────────────── */
+/* ── Aurora glass design system ──────────────────────────────────────────── */
 :root {
-  --neo-bg:    #e2e8f0;
-  --neo-dark:  rgba(163,177,198,0.65);
-  --neo-light: rgba(255,255,255,0.85);
+  --glass:          rgba(255, 255, 255, 0.68);
+  --glass-strong:   rgba(255, 255, 255, 0.84);
+  --glass-border:   rgba(255, 255, 255, 0.58);
+  --glass-border-dim: rgba(196, 206, 240, 0.32);
+  --glass-glow-top: inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  --aurora-shadow:  0 4px 28px rgba(99, 102, 241, 0.10), 0 1px 4px rgba(0, 0, 0, 0.04);
+  --aurora-shadow-hover: 0 10px 40px rgba(99, 102, 241, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --aurora-shadow-sm:    0 2px 14px rgba(99, 102, 241, 0.07), 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-/* Page wrapper — sets the neomorphic surface */
+/* Page wrapper — transparent so the fixed body aurora shows through glass cards */
 .neo-page {
-  background: var(--neo-bg);
   min-height: 100%;
+  position: relative;
 }
 
-/* Raised card */
+/* Organic aurora orbs — float behind the content */
+.neo-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 55% 40% at 72% 22%, rgba(139, 92, 246, 0.07) 0%, transparent 65%),
+    radial-gradient(ellipse 48% 36% at 18% 75%, rgba(6,  182, 212, 0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 42% 30% at 50% 90%, rgba(236, 72, 153, 0.04) 0%, transparent 55%);
+  animation: auroraFloat 26s ease-in-out infinite alternate;
+}
+
+.neo-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes auroraFloat {
+  0%   { transform: scale(1)    translateY(0px); opacity: 0.70; }
+  40%  { transform: scale(1.04) translateY(-10px); opacity: 1;   }
+  100% { transform: scale(1.02) translateY(6px);  opacity: 0.80; }
+}
+
+/* ── Glass raised card ──────────────────────────────────────────────────── */
 .neo-card {
-  background: var(--neo-bg);
+  background: var(--glass);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-radius: 20px;
-  border: none;
-  box-shadow: 8px 8px 18px var(--neo-dark), -8px -8px 18px var(--neo-light);
-  transition: box-shadow 0.22s ease, transform 0.22s ease;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--aurora-shadow), var(--glass-glow-top);
+  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
 }
 .neo-card:hover {
-  box-shadow: 10px 10px 22px var(--neo-dark), -10px -10px 22px var(--neo-light);
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow: var(--aurora-shadow-hover), var(--glass-glow-top);
   transform: translateY(-2px);
 }
 
-/* KPI card — slightly convex lift */
+/* ── Glass KPI card — iridescent tint gradient ──────────────────────────── */
 .neo-kpi {
-  background: linear-gradient(145deg, #eaf0f7, #d8dfe9);
+  background: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.88) 0%,
+    rgba(237, 240, 255, 0.80) 55%,
+    rgba(230, 244, 255, 0.76) 100%
+  );
+  backdrop-filter: blur(16px) saturate(170%);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
   border-radius: 18px;
-  border: none;
-  box-shadow: 6px 6px 14px var(--neo-dark), -6px -6px 14px var(--neo-light);
-  transition: box-shadow 0.22s ease, transform 0.22s ease;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--aurora-shadow), var(--glass-glow-top);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
   cursor: default;
 }
 .neo-kpi:hover {
-  box-shadow: 8px 8px 18px var(--neo-dark), -8px -8px 18px var(--neo-light);
-  transform: translateY(-3px) scale(1.015);
+  box-shadow: var(--aurora-shadow-hover), var(--glass-glow-top);
+  transform: translateY(-3px) scale(1.016);
 }
 
-/* Inset container — used for icon wells and chart areas */
+/* ── Icon well / inset ──────────────────────────────────────────────────── */
 .neo-inset {
-  background: var(--neo-bg);
-  border-radius: 14px;
-  box-shadow: inset 4px 4px 8px var(--neo-dark), inset -4px -4px 8px var(--neo-light);
+  background: rgba(228, 232, 255, 0.55);
+  border-radius: 12px;
+  border: 1px solid rgba(196, 206, 255, 0.30);
+  box-shadow: inset 0 2px 6px rgba(99, 102, 241, 0.09);
 }
 
-/* Small flat pill */
+/* ── Flat pill ──────────────────────────────────────────────────────────── */
 .neo-flat {
-  background: var(--neo-bg);
+  background: rgba(255, 255, 255, 0.65);
   border-radius: 10px;
-  box-shadow: 3px 3px 7px var(--neo-dark), -3px -3px 7px var(--neo-light);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--aurora-shadow-sm);
 }
 
-/* Table row hover */
+/* ── Table row hover ────────────────────────────────────────────────────── */
 .neo-row:hover {
-  background: rgba(255,255,255,0.45);
+  background: rgba(255, 255, 255, 0.52);
   border-radius: 10px;
 }
 
-/* Divider */
+/* ── Dividers ───────────────────────────────────────────────────────────── */
 .neo-divider {
-  border-color: rgba(163,177,198,0.25);
+  border-color: var(--glass-border-dim);
 }
 
-/* Status dot pulse for neo theme */
+/* ── Pulse animation (status indicators) ───────────────────────────────── */
 .neo-pulse {
   animation: neoPulse 1.8s ease-in-out infinite;
 }
 @keyframes neoPulse {
-  0%,100% { opacity:1; transform:scale(1); }
-  50%      { opacity:0.4; transform:scale(1.3); }
+  0%, 100% { opacity: 1;   transform: scale(1);   }
+  50%       { opacity: 0.4; transform: scale(1.3); }
+}
+
+/* ── Fallback for browsers without backdrop-filter ──────────────────────── */
+@supports not (backdrop-filter: blur(1px)) {
+  .neo-card  { background: rgba(255, 255, 255, 0.96); }
+  .neo-kpi   { background: rgba(245, 247, 255, 0.98); }
+  .neo-inset { background: rgba(235, 238, 255, 0.90); }
+  .neo-flat  { background: rgba(255, 255, 255, 0.95); }
 }

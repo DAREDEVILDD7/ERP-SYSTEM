@@ -56,6 +56,7 @@ class ErrorBoundary extends Component {
   }
 }
 
+// eslint-disable-next-line no-unused-vars
 const Placeholder = ({ name }) => (
   <div className="card p-8 text-center text-gray-400">{name} — coming soon</div>
 );

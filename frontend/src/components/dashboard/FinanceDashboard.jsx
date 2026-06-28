@@ -203,7 +203,7 @@ export default function FinanceDashboard() {
             </h3>
             <ResponsiveContainer width="100%" height={230}>
               <BarChart data={revenueBar} margin={{ left: 0, right: 10 }}>
-                <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" vertical={false} />
+                <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 10 }} />
                 <Tooltip

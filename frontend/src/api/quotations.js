@@ -2,6 +2,7 @@ import { supabase } from "../lib/supabaseClient";
 
 let _creating = false;
 
+// eslint-disable-next-line no-unused-vars
 function daysFromDates(start, end) {
   if (!start || !end) return null;
   const d1 = new Date(start);
