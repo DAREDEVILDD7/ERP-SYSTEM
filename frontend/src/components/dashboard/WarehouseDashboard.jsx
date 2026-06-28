@@ -8,20 +8,20 @@ import {
   AlertTriangle, RefreshCw, BarChart2,
 } from 'lucide-react';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format } from 'date-fns';
 import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
-const TYPE_COLORS = ['#f59e0b','#f97316','#ef4444','#8b5cf6','#3b82f6','#14b8a6','#22c55e','#06b6d4'];
+const TYPE_COLORS = ['#fbbf24','#fb923c','#f87171','#a78bfa','#60a5fa','#2dd4bf','#34d399','#22d3ee'];
 const STATUS_COLORS = {
-  Available:   '#22c55e',
-  Reserved:    '#eab308',
-  Dispatched:  '#3b82f6',
-  Maintenance: '#ef4444',
-  Retired:     '#9ca3af',
-  Locked:      '#a855f7',
+  Available:   '#34d399',
+  Reserved:    '#fbbf24',
+  Dispatched:  '#60a5fa',
+  Maintenance: '#f87171',
+  Retired:     '#94a3b8',
+  Locked:      '#c084fc',
 };
 const TABLES = ['equipment_units','equipment_types','maintenance'];
 
@@ -162,6 +162,7 @@ export default function WarehouseDashboard() {
               : (
                 <ResponsiveContainer width="100%" height={280}>
                   <BarChart data={byType} layout="vertical" margin={{ left: 10, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} />
                     <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />
@@ -187,7 +188,7 @@ export default function WarehouseDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={byStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={70} outerRadius={105}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={1000} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {byStatus.map(e => <Cell key={e.name} fill={STATUS_COLORS[e.name] ?? '#94a3b8'} />)}

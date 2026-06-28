@@ -9,14 +9,14 @@ import {
   Wrench, RefreshCw, AlertTriangle, ShieldCheck, TrendingUp,
 } from 'lucide-react';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format } from 'date-fns';
 import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
-const EQ_COLORS  = { Available: '#22c55e', Reserved: '#eab308', Dispatched: '#3b82f6', Maintenance: '#ef4444', Retired: '#9ca3af', Locked: '#a855f7' };
-const REQ_COLORS = ['#3b5bdb','#eab308','#a855f7','#22c55e','#ef4444','#9ca3af','#f97316'];
+const EQ_COLORS  = { Available: '#34d399', Reserved: '#fbbf24', Dispatched: '#60a5fa', Maintenance: '#f87171', Retired: '#94a3b8', Locked: '#c084fc' };
+const REQ_COLORS = ['#818cf8','#fbbf24','#a78bfa','#34d399','#f87171','#94a3b8','#fb923c'];
 const TABLES     = ['equipment_units','requirements','quotations','dispatches','maintenance'];
 
 export default function AdminDashboard() {
@@ -165,7 +165,7 @@ export default function AdminDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={equipmentByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={60} outerRadius={90}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {equipmentByStatus.map(e => <Cell key={e.name} fill={EQ_COLORS[e.name] ?? '#9ca3af'} />)}
@@ -188,6 +188,7 @@ export default function AdminDashboard() {
               : (
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={requirementsByStatus} layout="vertical" margin={{ left: 20, right: 16 }}>
+                    <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} />
                     <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />

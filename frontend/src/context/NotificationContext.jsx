@@ -160,7 +160,7 @@ export function NotificationProvider({ children }) {
       clearTimeout(bannerTimer.current);
       try { supabase.removeChannel(channel); } catch (_) {}
     };
-  }, [profile?.user_id]);
+  }, [profile?.user_id, enqueueBanners]);
 
   // ── actions ─────────────────────────────────────────────────────────────────
   const markRead = useCallback(async id => {

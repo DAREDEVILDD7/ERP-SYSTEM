@@ -17,10 +17,10 @@ import { DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './Das
 
 const QUOT_COLORS = {
   Draft:     '#94a3b8',
-  Sent:      '#3b82f6',
-  Approved:  '#22c55e',
-  Rejected:  '#ef4444',
-  Cancelled: '#d1d5db',
+  Sent:      '#60a5fa',
+  Approved:  '#34d399',
+  Rejected:  '#f87171',
+  Cancelled: '#cbd5e1',
 };
 const TABLES = ['requirements','quotations','customers'];
 
@@ -174,7 +174,7 @@ export default function SalesDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={quotationsByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={56} outerRadius={84}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {quotationsByStatus.map(e => <Cell key={e.name} fill={QUOT_COLORS[e.name] ?? '#94a3b8'} />)}

@@ -15,12 +15,12 @@ import { format } from 'date-fns';
 import { DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const DISPATCH_STATUS_COLORS = {
-  Pending:      '#f59e0b',
-  Assigned:     '#3b82f6',
-  'In Transit': '#6366f1',
-  Completed:    '#22c55e',
-  Returned:     '#14b8a6',
-  Cancelled:    '#ef4444',
+  Pending:      '#fbbf24',
+  Assigned:     '#60a5fa',
+  'In Transit': '#818cf8',
+  Completed:    '#34d399',
+  Returned:     '#2dd4bf',
+  Cancelled:    '#f87171',
 };
 const STATUS_ROW_CLS = {
   Pending:      'border-l-2 border-yellow-300',
@@ -175,7 +175,7 @@ export default function DispatchDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={dispatchByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={56} outerRadius={82}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {dispatchByStatus.map(e => <Cell key={e.name} fill={DISPATCH_STATUS_COLORS[e.name] ?? '#94a3b8'} />)}

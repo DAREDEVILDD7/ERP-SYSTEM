@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Activity, Users, Clock, LogIn, RefreshCw, Search,
-  Shield, Calendar, X, Monitor, Smartphone, Globe,
-  ChevronDown, AlertCircle, CheckCircle2, Timer,
+  Shield, Calendar, X,
+  ChevronDown, AlertCircle,
 } from 'lucide-react';
 import { format, isToday, parseISO, subDays } from 'date-fns';
 import toast from 'react-hot-toast';

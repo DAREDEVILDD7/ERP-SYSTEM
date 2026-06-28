@@ -1,34 +1,27 @@
-// Shared neomorphism + 3D chart utilities for all role dashboards.
+// Shared chart utilities — clean, segmented, professional theme.
 
-export const NEO_TOOLTIP_STYLE = {
-  background: '#e2e8f0',
-  borderRadius: 12,
-  border: 'none',
-  boxShadow: '4px 4px 10px rgba(163,177,198,0.65), -4px -4px 10px rgba(255,255,255,0.88)',
+// Clean white-card tooltip — no neomorphic shadow
+export const TOOLTIP_STYLE = {
+  background: '#ffffff',
+  borderRadius: 8,
+  border: '1px solid #e2e8f0',
+  boxShadow: '0 4px 16px rgba(15,23,42,0.08)',
   fontSize: 12,
-  color: '#1e293b',
+  color: '#334155',
+  padding: '8px 12px',
 };
+export const NEO_TOOLTIP_STYLE = TOOLTIP_STYLE;
 
-// Custom 3D bar shape — works for both vertical and horizontal bar orientations.
-// Draws a front face + lighter top face + darker right/end-cap face.
+// Flat rounded-end bar — replaces the 3D bar shape.
+// Works for both vertical and horizontal BarChart layouts.
 export function Bar3D({ x, y, width, height, fill }) {
-  if (!fill || !width || !height || width <= 0 || height <= 0) return null;
-  const d = 5; // depth offset in pixels
+  if (!width || !height || width <= 0 || height <= 0) return null;
+  const r = Math.min(3, Math.abs(width) / 2, Math.abs(height) / 2);
   return (
-    <g>
-      {/* front face */}
-      <rect x={x} y={y} width={width} height={height} fill={fill} rx={2} />
-      {/* top / leading face — lighter */}
-      <polygon
-        points={`${x},${y} ${x + width},${y} ${x + width + d},${y - d} ${x + d},${y - d}`}
-        style={{ fill, filter: 'brightness(1.32)' }}
-      />
-      {/* right / end-cap face — darker */}
-      <polygon
-        points={`${x + width},${y} ${x + width},${y + height} ${x + width + d},${y + height - d} ${x + width + d},${y - d}`}
-        style={{ fill, filter: 'brightness(0.72)' }}
-      />
-    </g>
+    <rect
+      x={x} y={y} width={width} height={height}
+      rx={r} ry={r} fill={fill} fillOpacity={0.86}
+    />
   );
 }
 
@@ -56,14 +49,6 @@ export function DonutCentre({ viewBox, total, label = 'total' }) {
   );
 }
 
-// SVG drop-shadow filter string for PieChart <defs>.
-// Each PieChart has its own SVG, so re-using id "nps" is safe.
-export const PIE_FILTER_DEF = (
-  <defs>
-    <filter id="nps" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="3" dy="4" stdDeviation="5" floodColor="rgba(163,177,198,0.8)" />
-    </filter>
-  </defs>
-);
-
-export const PIE_STYLE = { filter: 'url(#nps)' };
+// Drop-shadow removed for the clean segmented look — kept as no-ops for compat.
+export const PIE_FILTER_DEF = null;
+export const PIE_STYLE = {};

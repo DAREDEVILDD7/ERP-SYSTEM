@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format, differenceInDays, parseISO } from 'date-fns';
@@ -16,20 +16,20 @@ import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from
 
 const PROC_COLORS = {
   'Draft':             '#94a3b8',
-  'Pending Approval':  '#f59e0b',
-  'Approved':          '#3b82f6',
-  'Rejected':          '#ef4444',
-  'PO Issued':         '#8b5cf6',
-  'Delivered':         '#06b6d4',
-  'Received':          '#22c55e',
-  'Cancelled':         '#d1d5db',
+  'Pending Approval':  '#fbbf24',
+  'Approved':          '#60a5fa',
+  'Rejected':          '#f87171',
+  'PO Issued':         '#a78bfa',
+  'Delivered':         '#22d3ee',
+  'Received':          '#34d399',
+  'Cancelled':         '#cbd5e1',
 };
 const PO_COLORS = {
   'Draft':               '#94a3b8',
-  'Submitted':           '#f59e0b',
-  'Acknowledged':        '#3b82f6',
-  'Partially Delivered': '#8b5cf6',
-  'Delivered':           '#22c55e',
+  'Submitted':           '#fbbf24',
+  'Acknowledged':        '#60a5fa',
+  'Partially Delivered': '#a78bfa',
+  'Delivered':           '#34d399',
 };
 const PROC_STATUS_CLS = {
   'Draft':            'bg-slate-100 text-slate-600',
@@ -197,7 +197,7 @@ export default function ProcurementDashboard() {
                   <Pie
                     data={procByStatus} dataKey="value" nameKey="name"
                     cx="50%" cy="50%" innerRadius={62} outerRadius={92}
-                    paddingAngle={2} labelLine={false}
+                    paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                     isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                     style={PIE_STYLE}
                   >
@@ -223,6 +223,7 @@ export default function ProcurementDashboard() {
             ) : (
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={poByStatus} layout="vertical" margin={{ left: 12, right: 16 }}>
+                  <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} />
                   <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />

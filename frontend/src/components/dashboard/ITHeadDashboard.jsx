@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend, Label,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
@@ -55,17 +55,17 @@ const SESSION_STATUS_CFG = {
 };
 
 const EQ_COLORS = {
-  Available:   '#22c55e',
-  Reserved:    '#eab308',
-  Dispatched:  '#3b82f6',
-  Maintenance: '#ef4444',
-  Retired:     '#9ca3af',
-  Locked:      '#a855f7',
+  Available:   '#34d399',
+  Reserved:    '#fbbf24',
+  Dispatched:  '#60a5fa',
+  Maintenance: '#f87171',
+  Retired:     '#94a3b8',
+  Locked:      '#c084fc',
 };
 
 const ROLE_BAR_COLORS = [
-  '#6366f1','#3b82f6','#14b8a6','#f59e0b',
-  '#ef4444','#8b5cf6','#06b6d4','#22c55e','#f97316',
+  '#818cf8','#60a5fa','#2dd4bf','#fbbf24',
+  '#f87171','#a78bfa','#22d3ee','#34d399','#fb923c',
 ];
 
 const MAINT_STATUS_CLS = {
@@ -230,6 +230,7 @@ export default function ITHeadDashboard() {
             ) : (
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={usersByRole} layout="vertical" margin={{ left: 12, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
                   <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={140} />
                   <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />
@@ -258,7 +259,7 @@ export default function ITHeadDashboard() {
                   <Pie
                     data={equipmentByStatus} dataKey="value" nameKey="name"
                     cx="50%" cy="50%" innerRadius={62} outerRadius={92}
-                    paddingAngle={2} labelLine={false}
+                    paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                     isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                     style={PIE_STYLE}
                   >

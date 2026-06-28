@@ -3,7 +3,6 @@ import { fetchMaintenanceStats } from '../../api/dashboard';
 import { useAuth } from '../../context/AuthContext';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import LoadingSpinner from '../common/LoadingSpinner';
-import StatusBadge from '../common/StatusBadge';
 import {
   Wrench, AlertCircle, CheckCircle, Calendar,
   AlertTriangle, RefreshCw, Hammer, CheckCircle2,
@@ -15,13 +14,13 @@ import { format, isPast, parseISO } from 'date-fns';
 import { DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const ISSUE_COLORS = {
-  Mechanical: '#ef4444',
-  Electrical: '#f59e0b',
-  Hydraulic:  '#8b5cf6',
-  Tyre:       '#3b82f6',
-  Cooling:    '#06b6d4',
-  Body:       '#22c55e',
-  Other:      '#9ca3af',
+  Mechanical: '#f87171',
+  Electrical: '#fbbf24',
+  Hydraulic:  '#a78bfa',
+  Tyre:       '#60a5fa',
+  Cooling:    '#22d3ee',
+  Body:       '#34d399',
+  Other:      '#94a3b8',
 };
 const STATUS_CLS = {
   Open:         'bg-red-100 text-red-700',
@@ -172,7 +171,7 @@ export default function MaintenanceDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={byIssueType} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={58} outerRadius={86}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {byIssueType.map(e => <Cell key={e.name} fill={ISSUE_COLORS[e.name] ?? '#9ca3af'} />)}

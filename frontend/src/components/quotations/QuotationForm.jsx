@@ -1461,7 +1461,7 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
         }
 
         /* ── Equipment dropdown row — indent-on-hover ── */
-        .qf-scope .group\/eq:hover { padding-left: 1.25rem; }
+        .qf-scope .group/eq:hover { padding-left: 1.25rem; }
 
         /* ── Reserved badge pulse ── */
         .qf-scope .badge-reserved {
@@ -1469,7 +1469,7 @@ export default function QuotationForm({ existing, prefilledRequirement, onSucces
         }
 
         /* ── Line item card focus-within ring ── */
-        .qf-scope .group\/item:focus-within {
+        .qf-scope .group/item:focus-within {
           border-color: #c7d2fe;
         }
 

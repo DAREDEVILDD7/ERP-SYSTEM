@@ -9,22 +9,22 @@ import {
   Layers, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
-const LOC_COLORS  = ['#14b8a6','#3b82f6','#8b5cf6','#f59e0b','#ef4444','#06b6d4','#22c55e','#f97316'];
+const LOC_COLORS  = ['#2dd4bf','#60a5fa','#a78bfa','#fbbf24','#f87171','#22d3ee','#34d399','#fb923c'];
 const REQ_STATUS_COLORS = {
-  'Pending Review':    '#f59e0b',
-  'Operations Review': '#3b82f6',
-  'Approved':          '#22c55e',
-  'In Progress':       '#8b5cf6',
-  'Completed':         '#14b8a6',
-  'Rejected':          '#ef4444',
-  'Cancelled':         '#9ca3af',
+  'Pending Review':    '#fbbf24',
+  'Operations Review': '#60a5fa',
+  'Approved':          '#34d399',
+  'In Progress':       '#a78bfa',
+  'Completed':         '#2dd4bf',
+  'Rejected':          '#f87171',
+  'Cancelled':         '#94a3b8',
 };
 const PRIORITY_CLS = {
   Urgent: 'bg-red-100 text-red-700',
@@ -173,6 +173,7 @@ export default function OperationsDashboard() {
               : (
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={equipmentByLocation} layout="vertical" margin={{ left: 10, right: 20 }}>
+                    <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" horizontal={false} />
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={120} />
                     <Tooltip contentStyle={NEO_TOOLTIP_STYLE} />
@@ -198,7 +199,7 @@ export default function OperationsDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={requirementsByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={58} outerRadius={86}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {requirementsByStatus.map(e => <Cell key={e.name} fill={REQ_STATUS_COLORS[e.name] ?? '#94a3b8'} />)}

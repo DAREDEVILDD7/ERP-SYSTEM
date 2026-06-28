@@ -9,7 +9,7 @@ import {
   TrendingUp, AlertTriangle, RefreshCw, Landmark,
 } from 'lucide-react';
 import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  PieChart, Pie, Cell, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format } from 'date-fns';
@@ -17,10 +17,10 @@ import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from
 
 const INV_STATUS_COLORS = {
   Draft:     '#94a3b8',
-  Sent:      '#3b82f6',
-  Paid:      '#22c55e',
-  Overdue:   '#ef4444',
-  Cancelled: '#d1d5db',
+  Sent:      '#60a5fa',
+  Paid:      '#34d399',
+  Overdue:   '#f87171',
+  Cancelled: '#cbd5e1',
 };
 const TABLES = ['invoices','quotations'];
 
@@ -183,7 +183,7 @@ export default function FinanceDashboard() {
                     {PIE_FILTER_DEF}
                     <Pie data={invoiceByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={56} outerRadius={82}
-                      paddingAngle={2} labelLine={false}
+                      paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {invoiceByStatus.map(e => <Cell key={e.name} fill={INV_STATUS_COLORS[e.name] ?? '#94a3b8'} />)}
@@ -203,6 +203,7 @@ export default function FinanceDashboard() {
             </h3>
             <ResponsiveContainer width="100%" height={230}>
               <BarChart data={revenueBar} margin={{ left: 0, right: 10 }}>
+                <CartesianGrid strokeDasharray="3 4" stroke="#e2e8f0" vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 10 }} />
                 <Tooltip
@@ -211,9 +212,9 @@ export default function FinanceDashboard() {
                 />
                 <Bar dataKey="value" shape={Bar3D}
                   isAnimationActive animationDuration={900} animationEasing="ease-out">
-                  <Cell fill="#22c55e" />
-                  <Cell fill="#14b8a6" />
-                  <Cell fill="#ef4444" />
+                  <Cell fill="#34d399" />
+                  <Cell fill="#2dd4bf" />
+                  <Cell fill="#f87171" />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
