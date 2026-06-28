@@ -12,7 +12,7 @@ import { format, differenceInDays, parseISO } from 'date-fns';
 import LoadingSpinner from '../common/LoadingSpinner';
 import { useAuth } from '../../context/AuthContext';
 import { fetchProcurementStats } from '../../api/dashboard';
-import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
+import { ActivePieShape, Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const PROC_COLORS = {
   'Draft':             '#94a3b8',
@@ -57,6 +57,7 @@ export default function ProcurementDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeIdx,  setActiveIdx]  = useState(null);
 
   const hour     = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -198,6 +199,9 @@ export default function ProcurementDashboard() {
                     data={procByStatus} dataKey="value" nameKey="name"
                     cx="50%" cy="50%" innerRadius={62} outerRadius={92}
                     paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
+                    activeIndex={activeIdx} activeShape={ActivePieShape}
+                    onMouseEnter={(_, i) => setActiveIdx(i)}
+                    onMouseLeave={() => setActiveIdx(null)}
                     isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                     style={PIE_STYLE}
                   >

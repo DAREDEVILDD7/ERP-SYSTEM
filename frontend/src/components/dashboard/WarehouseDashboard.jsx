@@ -12,7 +12,7 @@ import {
   ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format } from 'date-fns';
-import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
+import { ActivePieShape, Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const TYPE_COLORS = ['#fbbf24','#fb923c','#f87171','#a78bfa','#60a5fa','#2dd4bf','#34d399','#22d3ee'];
 const STATUS_COLORS = {
@@ -31,6 +31,7 @@ export default function WarehouseDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeIdx,  setActiveIdx]  = useState(null);
 
   const hour     = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -189,6 +190,9 @@ export default function WarehouseDashboard() {
                     <Pie data={byStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={70} outerRadius={105}
                       paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
+                      activeIndex={activeIdx} activeShape={ActivePieShape}
+                      onMouseEnter={(_, i) => setActiveIdx(i)}
+                      onMouseLeave={() => setActiveIdx(null)}
                       isAnimationActive animationBegin={0} animationDuration={1000} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {byStatus.map(e => <Cell key={e.name} fill={STATUS_COLORS[e.name] ?? '#94a3b8'} />)}

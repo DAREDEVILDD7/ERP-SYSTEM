@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
+import { ActivePieShape, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const QUOT_COLORS = {
   Draft:     '#94a3b8',
@@ -31,6 +31,7 @@ export default function SalesDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeIdx,  setActiveIdx]  = useState(null);
 
   const hour     = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -175,6 +176,9 @@ export default function SalesDashboard() {
                     <Pie data={quotationsByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={56} outerRadius={84}
                       paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
+                      activeIndex={activeIdx} activeShape={ActivePieShape}
+                      onMouseEnter={(_, i) => setActiveIdx(i)}
+                      onMouseLeave={() => setActiveIdx(null)}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {quotationsByStatus.map(e => <Cell key={e.name} fill={QUOT_COLORS[e.name] ?? '#94a3b8'} />)}

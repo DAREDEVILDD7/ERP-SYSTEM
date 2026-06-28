@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
+import { ActivePieShape, Bar3D, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const LOC_COLORS  = ['#2dd4bf','#60a5fa','#a78bfa','#fbbf24','#f87171','#22d3ee','#34d399','#fb923c'];
 const REQ_STATUS_COLORS = {
@@ -41,6 +41,7 @@ export default function OperationsDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeIdx,  setActiveIdx]  = useState(null);
 
   const hour     = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -200,6 +201,9 @@ export default function OperationsDashboard() {
                     <Pie data={requirementsByStatus} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={58} outerRadius={86}
                       paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
+                      activeIndex={activeIdx} activeShape={ActivePieShape}
+                      onMouseEnter={(_, i) => setActiveIdx(i)}
+                      onMouseLeave={() => setActiveIdx(null)}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {requirementsByStatus.map(e => <Cell key={e.name} fill={REQ_STATUS_COLORS[e.name] ?? '#94a3b8'} />)}

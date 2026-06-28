@@ -11,7 +11,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend, Label,
 } from 'recharts';
 import { format, isPast, parseISO } from 'date-fns';
-import { DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
+import { ActivePieShape, DonutCentre, NEO_TOOLTIP_STYLE, PIE_FILTER_DEF, PIE_STYLE } from './DashUtils';
 
 const ISSUE_COLORS = {
   Mechanical: '#f87171',
@@ -34,6 +34,7 @@ export default function MaintenanceDashboard() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeIdx,  setActiveIdx]  = useState(null);
 
   const hour     = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -172,6 +173,9 @@ export default function MaintenanceDashboard() {
                     <Pie data={byIssueType} dataKey="value" nameKey="name"
                       cx="50%" cy="50%" innerRadius={58} outerRadius={86}
                       paddingAngle={5} stroke="white" strokeWidth={3} labelLine={false}
+                      activeIndex={activeIdx} activeShape={ActivePieShape}
+                      onMouseEnter={(_, i) => setActiveIdx(i)}
+                      onMouseLeave={() => setActiveIdx(null)}
                       isAnimationActive animationBegin={0} animationDuration={900} animationEasing="ease-out"
                       style={PIE_STYLE}>
                       {byIssueType.map(e => <Cell key={e.name} fill={ISSUE_COLORS[e.name] ?? '#9ca3af'} />)}

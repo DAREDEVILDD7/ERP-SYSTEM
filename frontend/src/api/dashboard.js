@@ -218,8 +218,8 @@ export async function fetchProcurementStats() {
     { data: allProcs,    error: e1 },
     { data: allPOs,      error: e2 },
     { count: vendorCount, error: e3 },
-    { data: recentProcs, error: _e4 },
-    { data: upcomingPOs, error: _e5 },
+    { data: recentProcs },
+    { data: upcomingPOs },
   ] = await Promise.all([
     supabase.from('procurements').select('procurement_id, status, total_amount_kwd, type, priority'),
     supabase.from('purchase_orders').select('po_id, status, total_amount_kwd, expected_delivery'),
@@ -272,13 +272,13 @@ export async function fetchITStats() {
 
   const [
     { data: allUsers,       error: e1 },
-    { data: sessionToday,   error: _e2 },
-    { data: activeSessions, error: _e3 },
-    { data: equipmentData,  error: _e4 },
-    { count: openMaint,     error: _e5 },
-    { count: pendingProc,   error: _e6 },
-    { data: recentSessions, error: _e7 },
-    { data: maintJobs,      error: _e8 },
+    { data: sessionToday   },
+    { data: activeSessions },
+    { data: equipmentData  },
+    { count: openMaint     },
+    { count: pendingProc   },
+    { data: recentSessions },
+    { data: maintJobs      },
   ] = await Promise.all([
     supabase.from('users').select('user_id, name, role, is_active'),
     supabase.from('session_logs').select('session_log_id', { count: 'exact', head: false })
