@@ -5,7 +5,6 @@ import { useAuth } from '../../context/AuthContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import { useAppStore } from '../../store/useAppStore';
 import StatusBadge from '../../components/common/StatusBadge';
-import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import RequirementForm from '../../components/requirements/RequirementForm';

@@ -41,7 +41,12 @@ function loadSessionLogId() {
 
 export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(() => loadSession());
-  const [loading, setLoading] = useState(false);
+  // Session restore is synchronous (loadSession() above reads sessionStorage
+  // directly), so there is no actual async loading window - this is never
+  // toggled. Kept as a plain value (not state) since several pages
+  // (ProtectedRoute, DashboardRouter, etc.) already destructure `loading`
+  // from useAuth() expecting it to exist.
+  const loading = false;
   const [error,   setError]   = useState(null);
 
   // Best-effort session end on tab/browser close (fetch + keepalive survives page unload)

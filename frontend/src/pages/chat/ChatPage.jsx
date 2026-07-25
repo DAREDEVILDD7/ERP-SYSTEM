@@ -55,7 +55,11 @@ export default function ChatPage() {
 
   // Fires on every navigation to /chat (location.key changes each time).
   // If threads are already loaded → open immediately; otherwise queue in ref.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Deliberately keyed on location.key alone: `loading`/`threads`/
+  // `handleSelectThread` are read fresh via closure, not tracked as
+  // triggers - re-running this on their change would fire it on every
+  // thread-list refresh, not just on navigation. The drain effect below
+  // handles the "threads loaded after this ran" case instead.
   useEffect(() => {
     const id = location.state?.openId;
     if (!id) return;
@@ -65,7 +69,7 @@ export default function ChatPage() {
     } else {
       pendingIdRef.current = id;                   // pick up once threads load
     }
-  }, [location.key]);                              // location.key = unique per navigation event
+  }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Once threads load, drain the pending queue
   useEffect(() => {
