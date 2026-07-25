@@ -1,0 +1,30 @@
+/* Ported from the standalone JTC loading animation project
+ * (D:\loadingpageJTC\app\globals.css). Only the rules JTCLogoAnimation.jsx
+ * actually depends on are carried over: the --jtc-base-w responsive base
+ * length (read via var() throughout the component) and its mobile
+ * breakpoint override. Values are unchanged from the original.
+ *
+ * The original also set global `body { background:#fff; overflow:hidden }`
+ * and a bare `img { user-select:none }` - those are NOT copied verbatim
+ * here because this is a full multi-page ERP app, not a single full-page
+ * animation site: applying them at the document level would break normal
+ * scrolling/backgrounds on every other screen. The animation's own inline
+ * `stage` style already gives it a fixed, full-viewport, opaque white
+ * surface, so nothing is lost - the user-select rule is scoped to the
+ * loading stage only so it has zero effect outside the loading screen.
+ */
+
+:root {
+  --jtc-base-w: min(70vw, 700px, 90vh);
+}
+@media (max-width: 480px), (max-height: 480px) {
+  :root {
+    /* +25% vs the default vw/vh terms - desktop/laptop/tablet untouched */
+    --jtc-base-w: min(87.5vw, 700px, 112.5vh);
+  }
+}
+
+.jtc-loading-stage img {
+  user-select: none;
+  -webkit-user-drag: none;
+}

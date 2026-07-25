@@ -15,6 +15,7 @@ export const ROLE_NAV = {
     'dashboard','requirements','quotations','equipment',
     'dispatch','maintenance','finance','procurement',
     'customers','chat','users','audit-logs',
+    'password-reset-requests',
   ],
   [ROLES.SALES]: [
     'dashboard','requirements','quotations','customers',
@@ -83,6 +84,7 @@ export const PERMISSIONS = {
   users_manage:         [ROLES.ADMIN, ROLES.IT_HEAD],
   audit_view:           [ROLES.ADMIN, ROLES.IT_HEAD],
   customers_write:      [ROLES.ADMIN, ROLES.SALES],
+  password_reset_admin: [ROLES.ADMIN],
 };
 
 export function hasPermission(userRole, permission) {

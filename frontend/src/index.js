@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import AppLoadingGate from './components/loading/AppLoadingGate';
 
 // Suppress Chrome extension message-channel errors that fire as unhandled
 // promise rejections when DevTools / extension ports close during navigation.
@@ -20,4 +21,8 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+root.render(
+  <AppLoadingGate>
+    <App />
+  </AppLoadingGate>
+);

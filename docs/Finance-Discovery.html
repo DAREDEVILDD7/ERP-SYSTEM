@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Finance Flow Questionnaire — ERP Integration</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13.5px;
+    color: #1e293b;
+    background: #fff;
+    line-height: 1.65;
+  }
+
+  /* ── Layout ── */
+  .page {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 52px 56px 40px;
+  }
+
+  /* ── Document header ── */
+  .doc-header {
+    border-bottom: 3px solid #1d4ed8;
+    padding-bottom: 24px;
+    margin-bottom: 36px;
+  }
+  .doc-eyebrow {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #3b82f6;
+    margin-bottom: 8px;
+  }
+  .doc-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 6px;
+    line-height: 1.2;
+  }
+  .doc-sub {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 16px;
+  }
+  .doc-purpose {
+    background: #eff6ff;
+    border-left: 4px solid #3b82f6;
+    border-radius: 0 8px 8px 0;
+    padding: 13px 18px;
+    font-size: 13px;
+    color: #1e40af;
+    line-height: 1.6;
+  }
+
+  /* ── Section ── */
+  .section {
+    margin-bottom: 32px;
+    page-break-inside: avoid;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    border-radius: 10px;
+  }
+  .section-num {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+    flex-shrink: 0;
+    color: #fff;
+  }
+  .section-label {
+    font-size: 15px;
+    font-weight: 700;
+    flex: 1;
+  }
+  .section-count {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    opacity: 0.85;
+  }
+
+  /* section colour themes */
+  .th-blue   { background: #eff6ff; }
+  .th-blue   .section-num   { background: #2563eb; }
+  .th-blue   .section-label { color: #1d4ed8; }
+  .th-blue   .section-count { background: #bfdbfe; color: #1d4ed8; }
+
+  .th-violet { background: #f5f3ff; }
+  .th-violet .section-num   { background: #7c3aed; }
+  .th-violet .section-label { color: #6d28d9; }
+  .th-violet .section-count { background: #ddd6fe; color: #6d28d9; }
+
+  .th-green  { background: #f0fdf4; }
+  .th-green  .section-num   { background: #16a34a; }
+  .th-green  .section-label { color: #15803d; }
+  .th-green  .section-count { background: #bbf7d0; color: #15803d; }
+
+  .th-purple { background: #fdf4ff; }
+  .th-purple .section-num   { background: #9333ea; }
+  .th-purple .section-label { color: #7e22ce; }
+  .th-purple .section-count { background: #e9d5ff; color: #7e22ce; }
+
+  .th-orange { background: #fff7ed; }
+  .th-orange .section-num   { background: #ea580c; }
+  .th-orange .section-label { color: #c2410c; }
+  .th-orange .section-count { background: #fed7aa; color: #c2410c; }
+
+  .th-teal   { background: #f0fdfa; }
+  .th-teal   .section-num   { background: #0d9488; }
+  .th-teal   .section-label { color: #0f766e; }
+  .th-teal   .section-count { background: #99f6e4; color: #0f766e; }
+
+  .th-amber  { background: #fffbeb; }
+  .th-amber  .section-num   { background: #d97706; }
+  .th-amber  .section-label { color: #b45309; }
+  .th-amber  .section-count { background: #fde68a; color: #b45309; }
+
+  /* ── Question ── */
+  .question {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 18px;
+    align-items: flex-start;
+  }
+  .question:last-child { margin-bottom: 0; }
+  .q-bubble {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .q-body { flex: 1; }
+  .q-text {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0f172a;
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  /* ── Footer ── */
+  .doc-footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #e2e8f0;
+    text-align: center;
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.8;
+  }
+
+  /* ── Print ── */
+  @media print {
+    body { font-size: 12.5px; }
+    .page { padding: 36px 44px 32px; max-width: 100%; }
+    .doc-title { font-size: 24px; }
+    .q-answer { background: #f8fafc !important; color: #94a3b8 !important; }
+    .section { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="doc-header">
+    <div class="doc-title">Finance Flow Questionnaire</div>
+    <div class="doc-purpose">
+      <strong>Purpose:</strong> Confirm how the finance process actually runs today — quotation → invoice → procurement → dispatch → maintenance — so it can be mapped correctly into the ERP system.
+    </div>
+  </div>
+
+  <!-- ── 1. Quotation & Approval ── -->
+  <div class="section">
+    <div class="section-header th-blue">
+      <div class="section-num">1</div>
+      <div class="section-label">Quotation &amp; Approval</div>
+      <div class="section-count">3 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">1</div>
+      <div class="q-body">
+        <div class="q-text">Who is allowed to approve a quotation — Finance only, or also Operations? Does the approval authority depend on the quotation value?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">2</div>
+      <div class="q-body">
+        <div class="q-text">What should happen if a quotation needs to change after approval (price, dates, quantity) — edit it, or cancel and re-quote?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">3</div>
+      <div class="q-body">
+        <div class="q-text">At what point is a job "confirmed" for Finance — quotation approval, a customer PO, or an advance payment?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2. Invoicing ── -->
+  <div class="section">
+    <div class="section-header th-violet">
+      <div class="section-num">2</div>
+      <div class="section-label">Invoicing</div>
+      <div class="section-count">4 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">4</div>
+      <div class="q-body">
+        <div class="q-text">When is the invoice actually created — right after quotation approval, when equipment is dispatched, or at job completion?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">5</div>
+      <div class="q-body">
+        <div class="q-text">Can one job / quotation ever need more than one invoice (partial or milestone billing), or is it always one invoice for the full amount?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">6</div>
+      <div class="q-body">
+        <div class="q-text">Does an invoice need internal sign-off before it is sent to the customer?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">7</div>
+      <div class="q-body">
+        <div class="q-text">How do you fix a wrong invoice today — edit it, or cancel and issue a new one / credit note?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 3. Customer Payments ── -->
+  <div class="section">
+    <div class="section-header th-green">
+      <div class="section-num">3</div>
+      <div class="section-label">Customer Payments</div>
+      <div class="section-count">3 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">8</div>
+      <div class="q-body">
+        <div class="q-text">Do customers ever pay in advance or in instalments, or is it always one full payment against the invoice?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">9</div>
+      <div class="q-body">
+        <div class="q-text">What payment methods do you need the system to track (bank transfer, cash, cheque, online)?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">10</div>
+      <div class="q-body">
+        <div class="q-text">What is your process for overdue invoices — who follows up, and after how long?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 4. Procurement ── -->
+  <div class="section">
+    <div class="section-header th-purple">
+      <div class="section-num">4</div>
+      <div class="section-label">Procurement <span style="font-weight:400;font-size:13px;">(for items not in your own fleet)</span></div>
+      <div class="section-count">3 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">11</div>
+      <div class="q-body">
+        <div class="q-text">When Finance approves a purchase, what are they checking — budget, vendor price, both?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">12</div>
+      <div class="q-body">
+        <div class="q-text">Once goods are received from a vendor, is there a separate vendor-invoice / payment step, or is it treated as a simple recorded expense?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">13</div>
+      <div class="q-body">
+        <div class="q-text">Do purchases need to stay within a project or job budget? Should the system block or warn if a purchase would exceed it?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 5. Dispatch & Maintenance ── -->
+  <div class="section">
+    <div class="section-header th-orange">
+      <div class="section-num">5</div>
+      <div class="section-label">Dispatch &amp; Maintenance</div>
+      <div class="section-count">2 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">14</div>
+      <div class="q-body">
+        <div class="q-text">Does maintenance on equipment get tracked as a cost against the job / project, or is it handled separately from job finances?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">15</div>
+      <div class="q-body">
+        <div class="q-text">Should equipment maintenance history or cost feed into project profitability, or is it tracked purely for fleet upkeep?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 6. Reporting ── -->
+  <div class="section">
+    <div class="section-header th-teal">
+      <div class="section-num">6</div>
+      <div class="section-label">Reporting</div>
+      <div class="section-count">1 question</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">16</div>
+      <div class="q-body">
+        <div class="q-text">Which reports does Finance actually need day-to-day or month-end (e.g. outstanding receivables, expenses by category, project profitability)?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 7. Budgets ── -->
+  <div class="section">
+    <div class="section-header th-amber">
+      <div class="section-num">7</div>
+      <div class="section-label">Budgets</div>
+      <div class="section-count">4 questions</div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">17</div>
+      <div class="q-body">
+        <div class="q-text">Do you have budgets per project? Per department? An annual company budget? Or none at all today?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">18</div>
+      <div class="q-body">
+        <div class="q-text">If project budgets exist — who sets them, when, and is it one total figure or broken into categories (equipment, procurement, transport, labour)?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">19</div>
+      <div class="q-body">
+        <div class="q-text">When a purchase request would exceed the project budget, should the system: (a) block it entirely, (b) allow it but require a higher-level approval, or (c) show a warning only?</div>
+      </div>
+    </div>
+
+    <div class="question">
+      <div class="q-bubble">20</div>
+      <div class="q-body">
+        <div class="q-text">Who can approve a budget increase, and are there value thresholds (Finance Manager up to X, GM above Y, MD above Z)?</div>
+      </div>
+    </div>
+  </div>
+
+
+</div>
+</body>
+</html>

@@ -7,7 +7,7 @@ import {
   LayoutDashboard, ClipboardList, FileText, Package,
   Truck, Wrench, DollarSign, Users, MessageSquare,
   ScrollText, LogOut, ShoppingCart, Building2,
-  MoreHorizontal, X,
+  MoreHorizontal, X, KeyRound,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -23,6 +23,7 @@ const ALL_NAV = [
   { key: 'customers',    label: 'Customers',    icon: Building2,       path: '/customers' },
   { key: 'chat',         label: 'Chat',         icon: MessageSquare,   path: '/chat' },
   { key: 'users',        label: 'Users',        icon: Users,           path: '/users' },
+  { key: 'password-reset-requests', label: 'Pw Resets', icon: KeyRound, path: '/password-reset-requests' },
   { key: 'audit-logs',   label: 'Audit',        icon: ScrollText,      path: '/audit-logs' },
 ];
 

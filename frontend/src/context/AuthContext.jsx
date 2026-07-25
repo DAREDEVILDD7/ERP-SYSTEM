@@ -40,16 +40,9 @@ function loadSessionLogId() {
 // ─── provider ───────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }) {
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState(() => loadSession());
+  const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState(null);
-
-  // Restore session on page refresh
-  useEffect(() => {
-    const saved = loadSession();
-    if (saved) setProfile(saved);
-    setLoading(false);
-  }, []);
 
   // Best-effort session end on tab/browser close (fetch + keepalive survives page unload)
   useEffect(() => {

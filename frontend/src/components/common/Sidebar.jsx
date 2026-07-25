@@ -17,10 +17,12 @@ import {
   ChevronRight,
   ShoppingCart,
   Building2,
+  KeyRound,
 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
 import { useNotifications } from "../../context/NotificationContext";
+import SidebarLogoHover from "./SidebarLogoHover";
 
 const NAV_ITEMS = [
   {
@@ -60,6 +62,12 @@ const NAV_ITEMS = [
   { key: "chat", label: "Chat", icon: MessageSquare, path: "/chat" },
   { key: "users", label: "User Mgmt", icon: Users, path: "/users" },
   {
+    key: "password-reset-requests",
+    label: "Password Resets",
+    icon: KeyRound,
+    path: "/password-reset-requests",
+  },
+  {
     key: "audit-logs",
     label: "Audit Logs",
     icon: ScrollText,
@@ -88,19 +96,12 @@ export default function Sidebar() {
         collapsed ? "w-16" : "w-56",
       )}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-100">
-        <div className="w-8 h-8 rounded-lg bg-primary-500 flex items-center justify-center shrink-0">
-          <span className="text-white text-xs font-bold">KW</span>
-        </div>
-        {!collapsed && (
-          <div className="overflow-hidden">
-            <p className="text-sm font-semibold text-gray-900 truncate">
-              KW Ops Portal
-            </p>
-            <p className="text-xs text-gray-400 truncate">{role}</p>
-          </div>
-        )}
+      {/* Brand — official JTC logo, shared with login page and loading screen.
+          Hovering triggers a scaled replay of the loading-page assembly
+          animation (wedge → J → T → C → red-dot flourish); see
+          SidebarLogoHover.jsx. */}
+      <div className="flex items-center justify-center px-4 h-16 border-b border-gray-100">
+        <SidebarLogoHover collapsed={collapsed} />
       </div>
 
       {/* Nav */}

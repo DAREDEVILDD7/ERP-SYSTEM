@@ -91,8 +91,11 @@ export default function DispatchManagePage() {
   const [expandedId,   setExpandedId]   = useState(null);
   const [previewQuote, setPreviewQuote] = useState(null);
   const [selectedDispatchId, setSelectedDispatchId] = useState(null);
-  const [showAllOngoing,    setShowAllOngoing]    = useState(false);
+  const [ongoingPage,       setOngoingPage]       = useState(0);
+  const [hoveredDot,        setHoveredDot]        = useState(null);
+  const [exitingMap,        setExitingMap]        = useState(new Map()); // id → dispatch snapshot
   const [pageLoading,       setPageLoading]       = useState(true);
+  const [loadError,         setLoadError]         = useState(false);
 
   // Search + filter state
   const [search,       setSearch]       = useState('');
@@ -160,9 +163,11 @@ export default function DispatchManagePage() {
       setDispatches(d);
       setQuotations(q);
       setAllEquipment(e);
+      setLoadError(false);
     } catch (err) {
       toast.error('Failed to load dispatch data');
       console.error(err);
+      setLoadError(true);
     } finally {
       setPageLoading(false);
     }
@@ -409,9 +414,17 @@ export default function DispatchManagePage() {
           ? `All ${selectedItemIds.length} item(s) dispatched`
           : `${selectedItemIds.length} of ${pendingCount} item(s) dispatched (partial dispatch)`
       );
+      const exitId   = dispatchItemsModal.dispatch_id;
+      const exitSnap = { ...dispatchItemsModal }; // freeze current data so animation survives a silent reload
       setDispatchItemsModal(null); setSelectedItemIds([]);
       setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); setPerItemDrivers({});
-      load();
+      setExitingMap(prev => new Map([...prev, [exitId, exitSnap]]));
+      setTimeout(() => {
+        // animation finished — drop snapshot and deselect if still selected
+        setExitingMap(prev => { const m = new Map(prev); m.delete(exitId); return m; });
+        setSelectedDispatchId(cur => cur === exitId ? null : cur);
+        // no load() here — useRealtimeRefresh fires load(true) silently when dispatch_items change
+      }, 680);
     } catch (err) { toast.error(err.message || 'Failed to dispatch items');
     } finally { setDispatchingItems(false); }
   };
@@ -764,7 +777,7 @@ export default function DispatchManagePage() {
         <div className="lg:col-span-2 card overflow-hidden flex flex-col">
           <div className="px-4 py-3 border-b border-gray-100 shrink-0 flex items-center justify-between">
             <h3 className="font-semibold text-gray-900">Ongoing Delivery</h3>
-            {!pageLoading && ongoingDispatches.length > 0 && (
+            {!pageLoading && !loadError && ongoingDispatches.length > 0 && (
               <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
                 {ongoingDispatches.length}
               </span>
@@ -795,80 +808,185 @@ export default function DispatchManagePage() {
                 </div>
               ))}
             </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center py-14 text-center px-4">
+              <AlertTriangle size={36} className="text-red-200 mb-2"/>
+              <p className="text-sm text-red-400 font-medium">Failed to load dispatches</p>
+              <p className="text-xs text-gray-400 mt-1">Check your connection and try again</p>
+              <button
+                type="button"
+                onClick={() => load()}
+                className="mt-4 text-xs font-medium text-blue-500 hover:text-blue-700 underline underline-offset-2 transition-colors">
+                Retry
+              </button>
+            </div>
           ) : ongoingDispatches.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-14 text-center">
               <Truck size={36} className="text-gray-200 mb-2"/>
               <p className="text-sm text-gray-400">No active dispatches</p>
             </div>
           ) : (
-            <>
-              <div className="divide-y divide-gray-100">
-                {(showAllOngoing ? ongoingDispatches : ongoingDispatches.slice(0, 5)).map(d => {
-                  const type  = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
-                  const unit  = d.dispatch_items?.[0]?.equipment_units;
-                  const isSel = sel?.dispatch_id === d.dispatch_id;
-                  return (
-                    <button key={d.dispatch_id} type="button"
-                      onClick={() => setSelectedDispatchId(d.dispatch_id)}
-                      className={clsx(
-                        'w-full text-left px-4 py-3.5 border-l-4 transition-all duration-200',
-                        isSel ? '' : 'hover:bg-gray-50/80'
-                      )}
-                      style={(() => {
-                        const s = STATUS_SIDEBAR[d.status] ?? { color: '#d1d5db', r: 209, g: 213, b: 219 };
-                        return isSel ? {
-                          borderLeftColor: s.color,
-                          backgroundColor: `rgba(${s.r},${s.g},${s.b},0.07)`,
-                          boxShadow: `inset 0 0 0 1px rgba(${s.r},${s.g},${s.b},0.2), inset 0 0 28px rgba(${s.r},${s.g},${s.b},0.10)`,
-                        } : {
-                          borderLeftColor: 'transparent',
-                        };
-                      })()}>
-                      <div className="flex items-start gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[11px] text-gray-400 mb-0.5">Dispatch ID:</p>
-                          <p className="font-bold text-gray-900 text-sm leading-tight truncate">{d.dispatch_id}</p>
-                          <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                            {type?.name && (
-                              <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.name}{unit?.capacity ? ` · ${unit.capacity}` : ''}</span>
-                            )}
-                            {d.quotations?.customers?.company_name && (
-                              <span className="text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full truncate max-w-[110px]">{d.quotations.customers.company_name}</span>
-                            )}
-                            <StatusBadge status={d.status}/>
-                          </div>
-                          <div className="flex items-center gap-1.5 mt-2 text-[11px] text-gray-500">
-                            <span>🇰🇼 Kuwait</span>
-                            <span className="text-gray-300">→</span>
-                            <span className="text-gray-700 font-medium truncate">🏢 {d.destination}</span>
-                          </div>
-                        </div>
-                        <EquipmentImage
-                          typeId={type?.type_id}
-                          imageUrl={type?.image_url}
-                          typeName={type?.name}
-                          contain
-                          className="h-16 w-28 rounded-xl bg-gray-100 shrink-0"/>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+            (() => {
+              const OG_PAGE_SIZE = 5;
+              const totalPages   = Math.ceil(ongoingDispatches.length / OG_PAGE_SIZE);
+              const safePage     = Math.min(ongoingPage, Math.max(0, totalPages - 1));
+              const pageItems    = ongoingDispatches.slice(safePage * OG_PAGE_SIZE, (safePage + 1) * OG_PAGE_SIZE);
 
-              {/* Expand / collapse button */}
-              {ongoingDispatches.length > 5 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAllOngoing(v => !v)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 border-t border-gray-100 text-xs font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors">
-                  {showAllOngoing ? (
-                    <><ChevronUp size={14}/> Show less</>
-                  ) : (
-                    <><ChevronDown size={14}/> Show {ongoingDispatches.length - 5} more dispatch{ongoingDispatches.length - 5 !== 1 ? 'es' : ''}</>
-                  )}
-                </button>
-              )}
-            </>
+              // Snapshots that are animating out but were removed from dispatches by a silent reload —
+              // keep them in the render list so the animation always plays to completion.
+              const exitingOnly  = [...exitingMap.values()].filter(
+                d => !pageItems.some(p => p.dispatch_id === d.dispatch_id)
+              );
+              const renderItems  = [...pageItems, ...exitingOnly];
+
+              return (
+                <>
+                  <div className="divide-y divide-gray-100 flex-1">
+                    {renderItems.map(d => {
+                      const type    = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
+                      const unit    = d.dispatch_items?.[0]?.equipment_units;
+                      const isSel   = sel?.dispatch_id === d.dispatch_id;
+                      const exiting = exitingMap.has(d.dispatch_id);
+                      return (
+                        <div key={d.dispatch_id} className={exiting ? 'dm-swipe-out' : undefined}>
+                          <button type="button"
+                            onClick={() => setSelectedDispatchId(d.dispatch_id)}
+                            className={clsx(
+                              'w-full text-left px-4 py-3.5 border-l-4 transition-all duration-200',
+                              isSel ? '' : 'hover:bg-gray-50/80'
+                            )}
+                            style={(() => {
+                              const s = STATUS_SIDEBAR[d.status] ?? { color: '#d1d5db', r: 209, g: 213, b: 219 };
+                              return isSel ? {
+                                borderLeftColor: s.color,
+                                backgroundColor: `rgba(${s.r},${s.g},${s.b},0.07)`,
+                                boxShadow: `inset 0 0 0 1px rgba(${s.r},${s.g},${s.b},0.2), inset 0 0 28px rgba(${s.r},${s.g},${s.b},0.10)`,
+                              } : {
+                                borderLeftColor: 'transparent',
+                              };
+                            })()}>
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] text-gray-400 mb-0.5">Dispatch ID:</p>
+                                <p className="font-bold text-gray-900 text-sm leading-tight truncate">{d.dispatch_id}</p>
+                                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                  {type?.name && (
+                                    <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{type.name}{unit?.capacity ? ` · ${unit.capacity}` : ''}</span>
+                                  )}
+                                  {d.quotations?.customers?.company_name && (
+                                    <span className="text-[11px] bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full">{d.quotations.customers.company_name}</span>
+                                  )}
+                                  <StatusBadge status={d.status}/>
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-2 text-[11px] text-gray-500">
+                                  <span>🇰🇼 Kuwait</span>
+                                  <span className="text-gray-300">→</span>
+                                  <span className="text-gray-700 font-medium truncate">🏢 {d.destination}</span>
+                                </div>
+                              </div>
+                              <EquipmentImage
+                                typeId={type?.type_id}
+                                imageUrl={type?.image_url}
+                                typeName={type?.name}
+                                contain
+                                className="h-16 w-28 rounded-xl bg-gray-100 shrink-0"/>
+                            </div>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Dot pagination */}
+                  {totalPages > 1 && (() => {
+                    // Windowed algorithm: always show first + last, window of current±1, ellipsis gaps
+                    const buildItems = () => {
+                      if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i);
+                      const left  = Math.max(1, safePage - 1);
+                      const right = Math.min(totalPages - 2, safePage + 1);
+                      const out   = [0];
+                      if (left > 1)              out.push('left-dot');
+                      for (let i = left; i <= right; i++) out.push(i);
+                      if (right < totalPages - 2) out.push('right-dot');
+                      out.push(totalPages - 1);
+                      return out;
+                    };
+                    const items = buildItems();
+
+                    return (
+                      <div
+                        className="flex items-center justify-center border-t border-gray-100 shrink-0"
+                        style={{ padding: '9px 12px', gap: '5px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+                        {items.map((item) => {
+                          /* ── Ellipsis button ── */
+                          if (item === 'left-dot' || item === 'right-dot') {
+                            const isLeft = item === 'left-dot';
+                            const target = isLeft
+                              ? Math.max(0, safePage - 3)
+                              : Math.min(totalPages - 1, safePage + 3);
+                            return (
+                              <button
+                                key={item}
+                                type="button"
+                                onMouseEnter={() => setHoveredDot(null)}
+                                onClick={() => setOngoingPage(target)}
+                                style={{
+                                  width: 22, height: 22,
+                                  borderRadius: '50%',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  flexShrink: 0, border: 'none', cursor: 'pointer',
+                                  backgroundColor: 'transparent',
+                                  transition: 'background-color 0.15s',
+                                }}
+                                onMouseLeave={() => setHoveredDot(null)}
+                                className="hover:bg-gray-100">
+                                <span style={{ fontSize: 9, fontWeight: 800, color: '#9ca3af', letterSpacing: '0.5px', userSelect: 'none', pointerEvents: 'none' }}>···</span>
+                              </button>
+                            );
+                          }
+
+                          /* ── Page dot ── */
+                          const isActive = item === safePage;
+                          const dist     = hoveredDot !== null ? item - hoveredDot : null;
+                          const scale    = dist === 0 ? 1.75 : 1;
+                          const tx       = dist === null ? 0 : dist === -1 ? -3 : dist === 1 ? 3 : 0;
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onMouseEnter={() => setHoveredDot(item)}
+                              onMouseLeave={() => setHoveredDot(null)}
+                              onClick={() => setOngoingPage(item)}
+                              style={{
+                                width: 22, height: 22,
+                                borderRadius: '50%',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                flexShrink: 0,
+                                transform: `translateX(${tx}px) scale(${scale})`,
+                                transition: 'transform 0.22s cubic-bezier(0.34,1.56,0.64,1), background-color 0.15s',
+                                backgroundColor: isActive ? '#3b82f6' : hoveredDot === item ? '#bfdbfe' : '#e5e7eb',
+                                zIndex: dist === 0 ? 10 : 1,
+                                position: 'relative',
+                                border: 'none',
+                                cursor: 'pointer',
+                              }}>
+                              <span style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                lineHeight: 1,
+                                color: isActive ? '#fff' : '#6b7280',
+                                userSelect: 'none',
+                                pointerEvents: 'none',
+                              }}>{item + 1}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </>
+              );
+            })()
           )}
         </div>
 
@@ -2038,6 +2156,18 @@ export default function DispatchManagePage() {
         @keyframes dmSlideUp      { from { opacity: 0; transform: translateY(20px) scale(0.97) } to { opacity: 1; transform: translateY(0) scale(1) } }
         @keyframes dmBulkBarSlide { from { opacity: 0; transform: translate(-50%, 20px) scale(0.94) } to { opacity: 1; transform: translate(-50%, 0) scale(1) } }
         @keyframes dmPopIn        { from { opacity: 0; transform: scale(0.93) } to { opacity: 1; transform: scale(1) } }
+        @keyframes dmSwipeOut {
+          0%   { transform: translateX(0)     scale(1);    opacity: 1;    max-height: 180px; border-top-width: 1px; }
+          12%  { transform: translateX(5%)    scale(0.99); opacity: 1;    max-height: 180px; border-top-width: 1px; }
+          62%  { transform: translateX(112%)  scale(0.97); opacity: 0;    max-height: 180px; border-top-width: 1px; }
+          100% { transform: translateX(112%)  scale(0.97); opacity: 0;    max-height: 0;     border-top-width: 0;   }
+        }
+        .dm-swipe-out {
+          animation: dmSwipeOut 0.62s linear forwards;
+          overflow: hidden;
+          will-change: transform, opacity;
+        }
+        .dm-swipe-out button { pointer-events: none; }
         /* .sk shimmer is now in global index.css */
       `}</style>
     </div>

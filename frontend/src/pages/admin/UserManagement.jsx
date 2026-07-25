@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getUsers, updateUser } from '../../api/users';
+import { useAuth } from '../../context/AuthContext';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import StatusBadge from '../../components/common/StatusBadge';
 import { SkeletonTable } from '../../components/common/Skeleton';
-import { X, Loader2, RefreshCw } from 'lucide-react';
+import { X, Loader2, RefreshCw, KeyRound, Eye, EyeOff, ChevronDown, ChevronUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const TABLES = ['users'];
@@ -11,11 +12,18 @@ const ROLES = ['Admin','Sales Executive','Operations Manager','Warehouse Operato
 const DEPTS = ['Admin','Sales','Operations','Warehouse','Dispatch','Finance','Maintenance','Procurement','IT'];
 
 export default function UserManagement() {
+  const { adminResetPassword } = useAuth();
   const [users,       setUsers]       = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [selected,    setSelected]    = useState(null);
   const [form,        setForm]        = useState({});
   const [formLoading, setFormLoading] = useState(false);
+
+  // password reset state
+  const [showPwSection, setShowPwSection] = useState(false);
+  const [pwForm,        setPwForm]        = useState({ newPassword: '', confirmPassword: '' });
+  const [showPw,        setShowPw]        = useState(false);
+  const [pwLoading,     setPwLoading]     = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -30,6 +38,33 @@ export default function UserManagement() {
   const openEdit = (u) => {
     setForm({ name: u.name, role: u.role, department: u.department, username: u.username??'', is_active: u.is_active });
     setSelected(u);
+    setShowPwSection(false);
+    setPwForm({ newPassword: '', confirmPassword: '' });
+    setShowPw(false);
+  };
+
+  const handlePasswordReset = async (e) => {
+    e.preventDefault();
+    if (!pwForm.newPassword || !pwForm.confirmPassword) {
+      toast.error('Both password fields are required.'); return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      toast.error('Passwords do not match.'); return;
+    }
+    if (pwForm.newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters.'); return;
+    }
+    setPwLoading(true);
+    try {
+      await adminResetPassword(selected.user_id, pwForm.newPassword);
+      toast.success(`Password reset for ${selected.name}`);
+      setShowPwSection(false);
+      setPwForm({ newPassword: '', confirmPassword: '' });
+    } catch (err) {
+      toast.error(err.message || 'Password reset failed.');
+    } finally {
+      setPwLoading(false);
+    }
   };
 
   const handleSave = async (e) => {
@@ -142,6 +177,65 @@ export default function UserManagement() {
                 </button>
               </div>
             </form>
+
+            {/* ── Reset Password ── */}
+            <div className="border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setShowPwSection(v => !v)}
+                className="w-full flex items-center justify-between px-5 py-3 text-sm text-gray-500 hover:bg-gray-50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <KeyRound size={14} className="text-gray-400" />
+                  Reset Password
+                </span>
+                {showPwSection ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+
+              {showPwSection && (
+                <form onSubmit={handlePasswordReset} className="px-5 pb-5 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                    <div className="relative">
+                      <input
+                        type={showPw ? 'text' : 'password'}
+                        className="input pr-10"
+                        placeholder="••••••••"
+                        value={pwForm.newPassword}
+                        onChange={e => setPwForm(f => ({ ...f, newPassword: e.target.value }))}
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPw(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                    <input
+                      type={showPw ? 'text' : 'password'}
+                      className="input"
+                      placeholder="••••••••"
+                      value={pwForm.confirmPassword}
+                      onChange={e => setPwForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={pwLoading}
+                    className="w-full btn-primary flex items-center justify-center gap-2 text-sm"
+                  >
+                    {pwLoading && <Loader2 size={14} className="animate-spin" />}
+                    {pwLoading ? 'Resetting…' : 'Set New Password'}
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}

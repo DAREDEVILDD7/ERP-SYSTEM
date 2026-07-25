@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Bell, X, CheckCheck, Trash2, Inbox, Loader2,
   FileText, FileCheck, Truck, Wrench, DollarSign,
-  ShoppingCart, Package, User, Info, MessageSquare,
+  ShoppingCart, Package, User, Info, MessageSquare, KeyRound,
 } from 'lucide-react';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useNotifications } from '../../context/NotificationContext';
@@ -20,6 +20,7 @@ const TYPE_CFG = {
   system:       { color: '#6b7280', bg: 'bg-gray-50',    Icon: Info        },
   user:         { color: '#f43f5e', bg: 'bg-rose-50',    Icon: User        },
   chat:         { color: '#06b6d4', bg: 'bg-cyan-50',    Icon: MessageSquare },
+  password_reset:{ color: '#ef4444', bg: 'bg-red-50',     Icon: KeyRound    },
 };
 const DEF_CFG = TYPE_CFG.system;
 

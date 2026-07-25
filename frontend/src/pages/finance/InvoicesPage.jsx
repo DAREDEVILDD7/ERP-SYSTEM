@@ -4,7 +4,7 @@ import { getInvoices, createInvoice, updateInvoice, getPendingQuotations, getLea
 import { getPurchaseOrders } from '../../api/procurement';
 import { useAuth } from '../../context/AuthContext';
 import StatusBadge from '../../components/common/StatusBadge';
-import { SkeletonTable } from '../../components/common/Skeleton';
+import { Sk, SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
 import {
   Plus, DollarSign, X, Loader2, RefreshCw,
@@ -85,6 +85,7 @@ export default function InvoicesPage() {
   });
 
   const [formLoading, setFormLoading] = useState(false);
+  const [loadError,   setLoadError]   = useState(false);
 
   const loadInvoices = useCallback(async () => {
     const [inv, pq] = await Promise.all([
@@ -129,7 +130,8 @@ export default function InvoicesPage() {
     setLoading(true);
     try {
       await Promise.all([loadInvoices(), loadExpenses(), loadAssets(), loadPOs(), loadLeaseInvoices()]);
-    } catch { toast.error('Failed to load finance data'); }
+      setLoadError(false);
+    } catch { toast.error('Failed to load finance data'); setLoadError(true); }
     finally { setLoading(false); }
   }, [loadInvoices, loadLeaseInvoices]);
 
@@ -337,22 +339,48 @@ export default function InvoicesPage() {
 
       {/* Summary KPI row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label:'Total Billed',   value: totalBilled,    color:'text-blue-600',   bg:'bg-blue-50',   icon: TrendingUp },
-          { label:'Collected',      value: totalCollected, color:'text-green-600',  bg:'bg-green-50',  icon: CheckCircle },
-          { label:'Outstanding',    value: totalPending,   color:'text-yellow-600', bg:'bg-yellow-50', icon: DollarSign },
-          { label:'Expenses (KWD)', value: totalExpenses,  color:'text-red-600',    bg:'bg-red-50',    icon: TrendingDown },
-        ].map(s => (
-          <div key={s.label} className={clsx('card p-4 flex items-center gap-3', s.bg)}>
-            <s.icon size={20} className={s.color} />
-            <div>
-              <p className="text-xs text-gray-500">{s.label}</p>
-              <p className={clsx('text-base font-bold', s.color)}>
-                {s.value.toLocaleString('en-US',{minimumFractionDigits:3})} <span className="text-xs font-normal">KWD</span>
-              </p>
+        {loading ? (
+          [
+            { bg: 'bg-blue-50',   w: 70 },
+            { bg: 'bg-green-50',  w: 60 },
+            { bg: 'bg-yellow-50', w: 75 },
+            { bg: 'bg-red-50',    w: 90 },
+          ].map(({ bg, w }, i) => (
+            <div key={i} className={clsx('card p-4 flex items-center gap-3', bg)}>
+              <Sk className="rounded-full shrink-0" style={{ width: 20, height: 20 }}/>
+              <div className="space-y-1.5 flex-1">
+                <Sk style={{ height: 9, width: w }}/>
+                <Sk style={{ height: 13, width: w + 30 }}/>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        ) : loadError ? (
+          [
+            'bg-blue-50', 'bg-green-50', 'bg-yellow-50', 'bg-red-50',
+          ].map((bg, i) => (
+            <div key={i} className={clsx('card p-4 flex items-center gap-3', bg)}>
+              <AlertTriangle size={18} className="text-gray-300 shrink-0"/>
+              <p className="text-xs text-gray-400">Unavailable</p>
+            </div>
+          ))
+        ) : (
+          [
+            { label:'Total Billed',   value: totalBilled,    color:'text-blue-600',   bg:'bg-blue-50',   icon: TrendingUp },
+            { label:'Collected',      value: totalCollected, color:'text-green-600',  bg:'bg-green-50',  icon: CheckCircle },
+            { label:'Outstanding',    value: totalPending,   color:'text-yellow-600', bg:'bg-yellow-50', icon: DollarSign },
+            { label:'Expenses (KWD)', value: totalExpenses,  color:'text-red-600',    bg:'bg-red-50',    icon: TrendingDown },
+          ].map(s => (
+            <div key={s.label} className={clsx('card p-4 flex items-center gap-3', s.bg)}>
+              <s.icon size={20} className={s.color} />
+              <div>
+                <p className="text-xs text-gray-500">{s.label}</p>
+                <p className={clsx('text-base font-bold', s.color)}>
+                  {s.value.toLocaleString('en-US',{minimumFractionDigits:3})} <span className="text-xs font-normal">KWD</span>
+                </p>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Tab bar */}

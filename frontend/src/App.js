@@ -17,6 +17,7 @@ import InvoicesPage from "./pages/finance/InvoicesPage";
 import ChatPage from "./pages/chat/ChatPage";
 import UserManagement from "./pages/admin/UserManagement";
 import AuditLogs from "./pages/admin/AuditLogs";
+import PasswordResetRequests from "./pages/admin/PasswordResetRequests";
 import ProcurementPage from "./pages/procurement/ProcurementPage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
@@ -166,6 +167,14 @@ export default function App() {
                 element={
                   <ProtectedRoute navKey="audit-logs">
                     <AuditLogs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="password-reset-requests"
+                element={
+                  <ProtectedRoute navKey="password-reset-requests">
+                    <PasswordResetRequests />
                   </ProtectedRoute>
                 }
               />
