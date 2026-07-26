@@ -252,7 +252,7 @@ export default function MaintenanceJobsPage() {
                                 <XCircle size={12}/>
                               </button>
                             )}
-                            <button onClick={() => openEdit(j)} className="text-xs text-primary-500 hover:underline">Edit</button>
+                            <button onClick={() => openEdit(j)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Edit</button>
                           </div>
                         </td>
                       )}

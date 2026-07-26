@@ -102,7 +102,7 @@ export default function CustomersPage() {
                     <td className="px-5 py-3 text-gray-500 text-xs">{c.phone ?? '—'}</td>
                     <td className="px-5 py-3 text-gray-500 text-xs">{c.email ?? '—'}</td>
                     <td className="px-5 py-3 text-gray-500 text-xs">{c.industry ?? '—'}</td>
-                    {canWrite && <td className="px-5 py-3"><button onClick={() => openEdit(c)} className="text-xs text-primary-500 hover:underline">Edit</button></td>}
+                    {canWrite && <td className="px-5 py-3"><button onClick={() => openEdit(c)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Edit</button></td>}
                   </tr>
                 ))}
               </tbody>

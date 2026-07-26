@@ -26,7 +26,6 @@ import toast from 'react-hot-toast';
 import clsx from 'clsx';
 
 const TABS          = ['Requests','Purchase Orders','Vendors'];
-// const PROC_STATUSES = ['Draft','Pending Approval','Approved','PO Issued','Partially Delivered','Delivered','Received','Cancelled','Rejected'];
 const EMPTY_ITEM    = { description:'', capacity:'', unit_price_kwd:'', equipment_type_id:'' };
 const PROC_TABLES   = ['procurements','purchase_orders','vendors','procurement_items'];
 
@@ -1263,7 +1262,7 @@ export default function ProcurementPage() {
                                 </button>
                                 {canWrite && p.status === 'Draft' && (
                                   <>
-                                    <button onClick={() => openProcEdit(p)} className="text-xs text-primary-500 hover:underline">Edit</button>
+                                    <button onClick={() => openProcEdit(p)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Edit</button>
                                     <button onClick={() => handleProcSubmit(p.procurement_id)} className="text-xs bg-blue-500 text-white px-2 py-1 rounded-lg">Submit</button>
                                   </>
                                 )}

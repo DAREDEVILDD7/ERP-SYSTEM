@@ -1,15 +1,21 @@
 import clsx from 'clsx';
 
+// `primary` is the JTC brand accent; it now backs the default tile so the
+// generic "no colour specified" case picks up the brand red centrally via
+// the Tailwind primary scale. Explicit `color="blue"` / `"green"` / etc.
+// still resolve to their literal palette so semantic status tiles (e.g. a
+// blue "Dispatched" counter) survive the rebrand.
 const COLOR_MAP = {
-  blue:   'bg-blue-50 text-blue-600',
-  green:  'bg-green-50 text-green-600',
-  yellow: 'bg-yellow-50 text-yellow-600',
-  red:    'bg-red-50 text-red-600',
-  purple: 'bg-purple-50 text-purple-600',
-  gray:   'bg-gray-100 text-gray-600',
+  primary: 'bg-primary-50 text-primary-600',
+  blue:    'bg-blue-50 text-blue-600',
+  green:   'bg-green-50 text-green-600',
+  yellow:  'bg-yellow-50 text-yellow-600',
+  red:     'bg-red-50 text-red-600',
+  purple:  'bg-purple-50 text-purple-600',
+  gray:    'bg-gray-100 text-gray-600',
 };
 
-export default function StatCard({ label, value, icon: Icon, color = 'blue', sub }) {
+export default function StatCard({ label, value, icon: Icon, color = 'primary', sub }) {
   return (
     <div className="card p-5 flex items-start gap-4">
       <div className={clsx('p-2.5 rounded-xl shrink-0', COLOR_MAP[color])}>

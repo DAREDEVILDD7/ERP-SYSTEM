@@ -24,10 +24,17 @@
     @apply bg-white rounded-xl border border-gray-100 shadow-sm;
   }
   .btn-primary {
-    @apply bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors;
+    @apply bg-primary-500 hover:bg-primary-600 active:bg-primary-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary-500;
   }
   .btn-secondary {
     @apply bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors;
+  }
+  /* Dispatch-only primary button. Keeps the pre-rebrand blue palette so the
+     Dispatch module remains visually identical to its previous appearance
+     while the rest of the app moves to JTC red via `.btn-primary`. Do not
+     use outside `src/pages/dispatch` or `src/components/dispatch`. */
+  .btn-dispatch {
+    @apply bg-dispatch-500 hover:bg-dispatch-600 active:bg-dispatch-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-dispatch-500;
   }
   .input {
     @apply w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
@@ -49,9 +56,13 @@
   --glass-border:   rgba(255, 255, 255, 0.58);
   --glass-border-dim: rgba(196, 206, 240, 0.32);
   --glass-glow-top: inset 0 1px 0 rgba(255, 255, 255, 0.90);
-  --aurora-shadow:  0 4px 28px rgba(99, 102, 241, 0.10), 0 1px 4px rgba(0, 0, 0, 0.04);
-  --aurora-shadow-hover: 0 10px 40px rgba(99, 102, 241, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --aurora-shadow-sm:    0 2px 14px rgba(99, 102, 241, 0.07), 0 1px 3px rgba(0, 0, 0, 0.03);
+  /* Card / glass surface shadow tint. Rebranded from indigo to a low-opacity
+     JTC red so raised glass surfaces read as branded rather than "cool
+     indigo," while the alpha kept low enough to remain a premium, near-
+     neutral shadow rather than a coloured wash. */
+  --aurora-shadow:  0 4px 28px rgba(238, 28, 37, 0.09), 0 1px 4px rgba(0, 0, 0, 0.04);
+  --aurora-shadow-hover: 0 10px 40px rgba(238, 28, 37, 0.14), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --aurora-shadow-sm:    0 2px 14px rgba(238, 28, 37, 0.06), 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 /* Page wrapper — transparent so the fixed body aurora shows through glass cards */
@@ -127,7 +138,7 @@
   background: rgba(228, 232, 255, 0.55);
   border-radius: 12px;
   border: 1px solid rgba(196, 206, 255, 0.30);
-  box-shadow: inset 0 2px 6px rgba(99, 102, 241, 0.09);
+  box-shadow: inset 0 2px 6px rgba(238, 28, 37, 0.08);
 }
 
 /* ── Flat pill ──────────────────────────────────────────────────────────── */

@@ -49,6 +49,33 @@ import "./jtc-loading.css";
 // tab, an unforeseen exception swallowed somewhere, etc.) this guarantees the
 // login page is never blocked indefinitely.
 const HARD_TIMEOUT_MS = 15000;
+
+// Session-scoped flag: the truck-delivery animation is intended as a
+// once-per-visit welcome, not something the user re-watches on every
+// full-page reload during the same browser session. sessionStorage matches
+// this exactly — it persists for the lifetime of the tab / window but is
+// cleared automatically when the tab closes, so returning to the app in a
+// fresh tab (or a new day) plays the animation again while a reload during
+// the current session skips straight to the app.
+const LOADING_PLAYED_KEY = "jtc_loading_played";
+
+function loadingAlreadyPlayed() {
+  try {
+    return window.sessionStorage.getItem(LOADING_PLAYED_KEY) === "1";
+  } catch (_) {
+    // Storage disabled / privacy mode — err on the side of playing the
+    // animation rather than silently swallowing it forever.
+    return false;
+  }
+}
+
+function markLoadingPlayed() {
+  try {
+    window.sessionStorage.setItem(LOADING_PLAYED_KEY, "1");
+  } catch (_) {
+    // Failing to persist just means the next reload will replay — harmless.
+  }
+}
 // Reduced-motion users get the component's own static-logo fallback frame
 // (unchanged), just for a short, fixed grace period instead of forever - the
 // ported component intentionally never advances its phase machine in that
@@ -81,7 +108,16 @@ class LoadingErrorBoundary extends Component {
 }
 
 export default function AppLoadingGate({ children }) {
-  const [visible, setVisible] = useState(true);
+  // Decide once, at mount, whether this browser session has already seen the
+  // welcome animation. Reading sessionStorage lazily inside useState avoids
+  // both the flicker of an "always mount, then hide" approach and any React
+  // re-render triggering a replay: a refresh, route change, or component
+  // remount all read the persisted flag on the first render and short-circuit
+  // straight to `skip = true`, so the animation branch below is never even
+  // mounted on subsequent visits within the same tab.
+  const [skip] = useState(loadingAlreadyPlayed);
+
+  const [visible, setVisible] = useState(!skip);
   const [fading, setFading] = useState(false); // fallback-path fade only
   const [dockRect, setDockRect] = useState(null);
   const [revealed, setRevealed] = useState(false); // login's own static logo should show
@@ -102,6 +138,7 @@ export default function AppLoadingGate({ children }) {
   const fallbackFinish = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    markLoadingPlayed();
     setRevealed(true);
     setFading(true);
     window.setTimeout(() => setVisible(false), FADE_MS);
@@ -123,11 +160,17 @@ export default function AppLoadingGate({ children }) {
   const handleDocked = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    markLoadingPlayed();
     setRevealed(true);
     window.setTimeout(() => setVisible(false), POST_DOCK_MS);
   }, []);
 
   useEffect(() => {
+    // Nothing to time out or grace-period when the animation isn't going to
+    // play at all this session - arming these timers would just risk a stray
+    // setState against an unmounted overlay path.
+    if (skip) return undefined;
+
     const timers = [window.setTimeout(fallbackFinish, HARD_TIMEOUT_MS)];
 
     let reducedMotion = false;
@@ -141,12 +184,19 @@ export default function AppLoadingGate({ children }) {
     }
 
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [fallbackFinish]);
+  }, [fallbackFinish, skip]);
 
   const dockContextValue = useMemo(
     () => ({ registerSlot, revealed }),
     [registerSlot, revealed],
   );
+
+  // Subsequent visits within the same browser session: the animation already
+  // played once in this tab, so we render the app directly with no overlay
+  // and no dock provider. Passing `null` (via the default context value) lets
+  // the login page render immediately with its own static logo visible, since
+  // it explicitly treats `dock === null` as "no gating - show now."
+  if (skip) return children;
 
   return (
     <LogoDockContext.Provider value={dockContextValue}>

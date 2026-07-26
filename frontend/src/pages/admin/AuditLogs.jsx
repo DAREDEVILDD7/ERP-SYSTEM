@@ -186,8 +186,8 @@ export default function AuditLogs() {
         .sl-pulse { animation: slPulse   1.6s ease-in-out infinite }
         .sl-row   { animation: slFadeIn  0.22s ease both }
         .sl-date  { color-scheme: light }
-        .sl-date:focus { outline: 2px solid #6366f1; outline-offset: 2px; border-color: #6366f1 }
-        .sl-select:focus { outline: 2px solid #6366f1; outline-offset: 2px; border-color: #6366f1 }
+        .sl-date:focus { outline: 2px solid #EE1C25; outline-offset: 2px; border-color: #EE1C25 }
+        .sl-select:focus { outline: 2px solid #EE1C25; outline-offset: 2px; border-color: #EE1C25 }
       `}</style>
 
       <div className="space-y-5 sl-fade">

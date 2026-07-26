@@ -113,7 +113,7 @@ export default function UserManagement() {
                     <td className="px-5 py-3"><span className="badge bg-blue-50 text-blue-700 border border-blue-100">{u.role}</span></td>
                     <td className="px-5 py-3 text-gray-500">{u.department}</td>
                     <td className="px-5 py-3"><StatusBadge status={u.is_active ? 'Available' : 'Retired'} /></td>
-                    <td className="px-5 py-3"><button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline">Edit</button></td>
+                    <td className="px-5 py-3"><button onClick={() => openEdit(u)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Edit</button></td>
                   </tr>
                 ))}
               </tbody>

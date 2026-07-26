@@ -515,7 +515,7 @@ export default function DispatchManagePage() {
         <form onSubmit={handleSave} className="space-y-4">
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">1</span>
+              <span className="w-6 h-6 rounded-full bg-dispatch-500 text-white text-xs flex items-center justify-center font-bold">1</span>
               Link to Approved Quotation (optional)
             </h3>
             <div className="relative">
@@ -532,7 +532,7 @@ export default function DispatchManagePage() {
                   <button key={q.quotation_id} type="button"
                     onClick={() => { handleQuoteSelect(q.quotation_id); setQuoteSearch(''); }}
                     className={clsx('w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0',
-                      form.quotation_id === q.quotation_id && 'bg-primary-50')}>
+                      form.quotation_id === q.quotation_id && 'bg-dispatch-50')}>
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm font-medium text-gray-800">{q.customers?.company_name}</p>
@@ -578,7 +578,7 @@ export default function DispatchManagePage() {
                           {isAvail && (
                             <button type="button" onClick={() => toggleEquipment(item.equipment_id)}
                               className={clsx('px-2 py-0.5 rounded text-xs font-medium',
-                                isSelected ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600')}>
+                                isSelected ? 'bg-dispatch-500 text-white' : 'bg-gray-100 text-gray-600')}>
                               {isSelected ? '✓ Selected' : 'Select'}
                             </button>
                           )}
@@ -593,10 +593,10 @@ export default function DispatchManagePage() {
 
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">2</span>
+              <span className="w-6 h-6 rounded-full bg-dispatch-500 text-white text-xs flex items-center justify-center font-bold">2</span>
               Select Equipment
               {selectedEqIds.length > 0 && (
-                <span className="ml-auto text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full font-medium">{selectedEqIds.length} selected</span>
+                <span className="ml-auto text-xs bg-dispatch-100 text-dispatch-700 px-2 py-0.5 rounded-full font-medium">{selectedEqIds.length} selected</span>
               )}
             </h3>
             <div className="relative">
@@ -613,10 +613,10 @@ export default function DispatchManagePage() {
                   <button key={eq.equipment_id} type="button"
                     onClick={() => toggleEquipment(eq.equipment_id)}
                     className={clsx('w-full flex items-center justify-between px-4 py-3 border-b border-gray-50 last:border-0 transition-colors text-left',
-                      isSelected ? 'bg-primary-50' : isReserved ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-50')}>
+                      isSelected ? 'bg-dispatch-50' : isReserved ? 'bg-yellow-50 hover:bg-yellow-100' : 'hover:bg-gray-50')}>
                     <div className="flex items-center gap-3">
                       <div className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center shrink-0',
-                        isSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300')}>
+                        isSelected ? 'border-dispatch-500 bg-dispatch-500' : 'border-gray-300')}>
                         {isSelected && <CheckCircle size={12} className="text-white"/>}
                       </div>
                       <div>
@@ -630,15 +630,15 @@ export default function DispatchManagePage() {
               })}
             </div>
             {selectedEqIds.length > 0 && (
-              <div className="bg-primary-50 rounded-xl p-3 space-y-1">
-                <p className="text-xs font-semibold text-primary-700 mb-2">Selected ({selectedEqIds.length} items):</p>
+              <div className="bg-dispatch-50 rounded-xl p-3 space-y-1">
+                <p className="text-xs font-semibold text-dispatch-700 mb-2">Selected ({selectedEqIds.length} items):</p>
                 {selectedEqIds.map(id => {
                   const eq = allEquipment.find(e => e.equipment_id === id)
                     || quoteEquipment.find(i => i.equipment_id === id)?.equipment_units;
                   return (
                     <div key={id} className="flex items-center justify-between text-xs">
-                      <span className="text-primary-800">{eq?.equipment_types?.name ?? 'Unknown'} {eq?.capacity} — {id}</span>
-                      <button type="button" onClick={() => toggleEquipment(id)} className="text-primary-400 hover:text-primary-600"><X size={12}/></button>
+                      <span className="text-dispatch-800">{eq?.equipment_types?.name ?? 'Unknown'} {eq?.capacity} — {id}</span>
+                      <button type="button" onClick={() => toggleEquipment(id)} className="text-dispatch-400 hover:text-dispatch-600"><X size={12}/></button>
                     </div>
                   );
                 })}
@@ -648,7 +648,7 @@ export default function DispatchManagePage() {
 
           <div className="card p-5 space-y-4">
             <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-xs flex items-center justify-center font-bold">3</span>
+              <span className="w-6 h-6 rounded-full bg-dispatch-500 text-white text-xs flex items-center justify-center font-bold">3</span>
               Dispatch Details
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -687,7 +687,7 @@ export default function DispatchManagePage() {
           <div className="flex justify-end gap-3 pb-6">
             <button type="button" onClick={() => { setShowForm(false); resetForm(); }} className="btn-secondary">Cancel</button>
             <button type="submit" disabled={formLoading || selectedEqIds.length === 0}
-              className="btn-primary flex items-center gap-2 disabled:opacity-60">
+              className="btn-dispatch flex items-center gap-2 disabled:opacity-60">
               {formLoading && <Loader2 size={15} className="animate-spin"/>}
               {formLoading
                 ? `Creating ${selectedEqIds.length} dispatch order${selectedEqIds.length !== 1 ? 's' : ''}…`
@@ -731,7 +731,7 @@ export default function DispatchManagePage() {
         <div className="flex gap-2">
           <button onClick={load} className="btn-secondary p-2"><RefreshCw size={16}/></button>
           {canWrite && (
-            <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
+            <button onClick={() => setShowForm(true)} className="btn-dispatch flex items-center gap-2">
               <Plus size={16}/> New Dispatch
             </button>
           )}
@@ -1181,7 +1181,7 @@ export default function DispatchManagePage() {
                     {sel.status === 'Pending' && (
                       <button
                         onClick={() => { setAssignTarget(sel); setAssignForm({ driver_name: sel.driver_name??'', vehicle_type: sel.vehicle_type??'', vehicle_plate: sel.vehicle_plate??'', notes: sel.notes??'' }); }}
-                        className="btn-primary flex items-center gap-1.5 text-sm">
+                        className="btn-dispatch flex items-center gap-1.5 text-sm">
                         <User size={13}/> Assign Driver
                       </button>
                     )}
@@ -1223,7 +1223,7 @@ export default function DispatchManagePage() {
               {STATUSES.map(s => (
                 <button key={s} onClick={() => setStatusFilter(s)}
                   className={clsx('px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors',
-                    statusFilter === s ? 'bg-primary-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
+                    statusFilter === s ? 'bg-dispatch-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>
                   {s}
                 </button>
               ))}
@@ -1239,7 +1239,7 @@ export default function DispatchManagePage() {
               {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"><X size={13}/></button>}
             </div>
             <button onClick={() => setShowFilters(v => !v)}
-              className={clsx('btn-secondary flex items-center gap-1.5 text-sm', hasActiveFilters && 'ring-2 ring-primary-300')}>
+              className={clsx('btn-secondary flex items-center gap-1.5 text-sm', hasActiveFilters && 'ring-2 ring-dispatch-300')}>
               <Filter size={14}/> Filters
             </button>
           </div>
@@ -1334,7 +1334,7 @@ export default function DispatchManagePage() {
                         {filteredPendingIds.length > 0 && (
                           <button type="button" onClick={toggleSelectAll}
                             className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center',
-                              allPendingSelected ? 'border-primary-500 bg-primary-500' : 'border-gray-300')}>
+                              allPendingSelected ? 'border-dispatch-500 bg-dispatch-500' : 'border-gray-300')}>
                             {allPendingSelected && <Check size={12} className="text-white"/>}
                           </button>
                         )}
@@ -1366,14 +1366,14 @@ export default function DispatchManagePage() {
                       <React.Fragment key={d.dispatch_id}>
                         <tr
                           className={clsx('transition-colors cursor-pointer',
-                            selectedDispatchIds.has(d.dispatch_id) ? 'bg-primary-50 hover:bg-primary-50' : 'hover:bg-gray-50')}
+                            selectedDispatchIds.has(d.dispatch_id) ? 'bg-dispatch-50 hover:bg-dispatch-50' : 'hover:bg-gray-50')}
                           onClick={() => setExpandedId(isExpanded ? null : d.dispatch_id)}>
                           {canWrite && (
                             <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
                               {d.status === 'Pending' && (
                                 <button type="button" onClick={() => toggleDispatchSelect(d.dispatch_id)}
                                   className={clsx('w-5 h-5 rounded border-2 flex items-center justify-center',
-                                    selectedDispatchIds.has(d.dispatch_id) ? 'border-primary-500 bg-primary-500' : 'border-gray-300 hover:border-primary-400')}>
+                                    selectedDispatchIds.has(d.dispatch_id) ? 'border-dispatch-500 bg-dispatch-500' : 'border-gray-300 hover:border-dispatch-400')}>
                                   {selectedDispatchIds.has(d.dispatch_id) && <Check size={12} className="text-white"/>}
                                 </button>
                               )}
@@ -1387,7 +1387,7 @@ export default function DispatchManagePage() {
                             {d.quotation_id && (
                               <button type="button"
                                 onClick={e => { e.stopPropagation(); setPreviewQuote(d.quotations); }}
-                                className="flex items-center gap-1 text-xs text-primary-500 hover:underline">
+                                className="flex items-center gap-1 text-xs text-dispatch-500 hover:underline">
                                 <Eye size={10}/> {d.quotation_id}
                               </button>
                             )}
@@ -1437,7 +1437,7 @@ export default function DispatchManagePage() {
                                 {d.status === 'Pending' && (
                                   <button
                                     onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
-                                    className="text-xs bg-primary-500 text-white px-2 py-1 rounded-lg whitespace-nowrap">
+                                    className="text-xs bg-dispatch-500 text-white px-2 py-1 rounded-lg whitespace-nowrap">
                                     Assign
                                   </button>
                                 )}
@@ -1534,7 +1534,7 @@ export default function DispatchManagePage() {
                                       autoFocus/>
                                     <div className="flex gap-2">
                                       <button onClick={() => saveNotes(d.dispatch_id)} disabled={savingNotes}
-                                        className="text-xs bg-primary-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50">
+                                        className="text-xs bg-dispatch-500 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 disabled:opacity-50">
                                         {savingNotes ? <Loader2 size={11} className="animate-spin"/> : <Check size={11}/>} Save
                                       </button>
                                       <button onClick={() => setEditingNotesId(null)}
@@ -1580,7 +1580,7 @@ export default function DispatchManagePage() {
                 const primaryType     = d.dispatch_items?.[0]?.equipment_units?.equipment_types;
 
                 return (
-                  <div key={d.dispatch_id} className={clsx('p-4', selectedDispatchIds.has(d.dispatch_id) && 'bg-primary-50/30')}>
+                  <div key={d.dispatch_id} className={clsx('p-4', selectedDispatchIds.has(d.dispatch_id) && 'bg-dispatch-50/30')}>
                     <div className="flex gap-3">
                       <EquipmentImage
                         typeId={primaryType?.type_id}
@@ -1615,7 +1615,7 @@ export default function DispatchManagePage() {
                     <div className="flex gap-2 mt-3 flex-wrap">
                       {canWrite && d.status === 'Pending' && (
                         <button onClick={() => { setAssignTarget(d); setAssignForm({ driver_name: d.driver_name??'', vehicle_type: d.vehicle_type??'', vehicle_plate: d.vehicle_plate??'', notes: d.notes??'' }); }}
-                          className="text-xs bg-primary-500 text-white px-3 py-1.5 rounded-lg">Assign Driver</button>
+                          className="text-xs bg-dispatch-500 text-white px-3 py-1.5 rounded-lg">Assign Driver</button>
                       )}
                       {canWrite && ['Assigned','In Transit'].includes(d.status) && pendingItems.length > 0 && (
                         <button onClick={() => openDispatchItems(d)} className="text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg">Dispatch Items</button>
@@ -1646,7 +1646,7 @@ export default function DispatchManagePage() {
           </div>
           <div className="w-px h-5 bg-white/20"/>
           <button onClick={() => setShowBulkAssign(true)}
-            className="flex items-center gap-1.5 text-sm bg-primary-500 hover:bg-primary-400 px-3 py-1.5 rounded-xl font-medium transition-colors">
+            className="flex items-center gap-1.5 text-sm bg-dispatch-500 hover:bg-dispatch-400 px-3 py-1.5 rounded-xl font-medium transition-colors">
             <Users size={14}/> Assign to Driver
           </button>
           <button onClick={clearSelection}
@@ -1665,7 +1665,7 @@ export default function DispatchManagePage() {
             <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10 rounded-t-2xl">
               <div>
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <Users size={16} className="text-primary-500"/> Bulk Assign Driver
+                  <Users size={16} className="text-dispatch-500"/> Bulk Assign Driver
                 </h3>
                 <p className="text-sm text-gray-400">{selectedDispatchIds.size} dispatch{selectedDispatchIds.size !== 1 ? 'es' : ''} · all will be set to Assigned</p>
               </div>
@@ -1741,7 +1741,7 @@ export default function DispatchManagePage() {
                 <button onClick={() => setShowBulkAssign(false)} className="btn-secondary">Cancel</button>
                 <button onClick={handleBulkAssign}
                   disabled={bulkAssigning || !bulkAssignForm.driver_name.trim()}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  className="btn-dispatch flex items-center gap-2 disabled:opacity-50">
                   {bulkAssigning && <Loader2 size={14} className="animate-spin"/>}
                   {bulkAssigning ? `Assigning ${selectedDispatchIds.size}…` : `Assign ${selectedDispatchIds.size} Dispatch${selectedDispatchIds.size !== 1 ? 'es' : ''}`}
                 </button>
@@ -1758,7 +1758,7 @@ export default function DispatchManagePage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-4"
             style={{ animation: 'dmSlideUp 0.22s cubic-bezier(0.34,1.56,0.64,1)' }}>
             <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-              <Truck size={18} className="text-primary-500"/> Assign Driver & Vehicle
+              <Truck size={18} className="text-dispatch-500"/> Assign Driver & Vehicle
             </h3>
             <p className="text-sm text-gray-500">
               <span className="font-medium text-gray-700">{assignTarget.dispatch_id}</span>
@@ -1793,7 +1793,7 @@ export default function DispatchManagePage() {
             <div className="flex justify-end gap-3">
               <button onClick={() => setAssignTarget(null)} className="btn-secondary">Cancel</button>
               <button onClick={handleAssign} disabled={assigning || !assignForm.driver_name.trim()}
-                className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                className="btn-dispatch flex items-center gap-2 disabled:opacity-50">
                 {assigning && <Loader2 size={14} className="animate-spin"/>}
                 {assigning ? 'Assigning…' : 'Confirm Assignment'}
               </button>
@@ -1828,7 +1828,7 @@ export default function DispatchManagePage() {
                 </p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setSelectedItemIds((dispatchItemsModal.dispatch_items ?? []).filter(i => i.dispatch_status === 'Pending').map(i => i.item_id))}
-                    className="text-xs text-primary-500 hover:underline">Select all</button>
+                    className="text-xs text-dispatch-500 hover:underline">Select all</button>
                   <span className="text-gray-300">·</span>
                   <button type="button" onClick={() => setSelectedItemIds([])}
                     className="text-xs text-gray-400 hover:underline">Deselect all</button>
@@ -1938,7 +1938,7 @@ export default function DispatchManagePage() {
               <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
                 <button onClick={() => { setDispatchItemsModal(null); setSelectedItemIds([]); setSharedDriver({ driver_name:'', vehicle_type:'', vehicle_plate:'' }); setPerItemDrivers({}); }} className="btn-secondary">Cancel</button>
                 <button onClick={handleDispatchItems} disabled={dispatchingItems || selectedItemIds.length === 0}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  className="btn-dispatch flex items-center gap-2 disabled:opacity-50">
                   {dispatchingItems && <Loader2 size={14} className="animate-spin"/>}
                   {dispatchingItems ? 'Dispatching…' : `Dispatch ${selectedItemIds.length} Item${selectedItemIds.length !== 1 ? 's' : ''}`}
                 </button>
@@ -1978,7 +1978,7 @@ export default function DispatchManagePage() {
                 <p className="text-sm font-medium text-gray-700">Dispatched Items ({returnSelects.length})</p>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setReturnSelects(rs => rs.map(r => ({...r, selected:true})))}
-                    className="text-xs text-primary-500 hover:underline">Select all</button>
+                    className="text-xs text-dispatch-500 hover:underline">Select all</button>
                   <span className="text-gray-300">·</span>
                   <button type="button" onClick={() => setReturnSelects(rs => rs.map(r => ({...r, selected:false})))}
                     className="text-xs text-gray-400 hover:underline">Deselect all</button>

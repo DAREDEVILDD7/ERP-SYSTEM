@@ -814,7 +814,7 @@ export default function EquipmentPage() {
                                 <option key={s}>{s}</option>
                               ))}
                             </select>
-                            <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline">
+                            <button onClick={() => openEdit(u)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">
                               Edit
                             </button>
                             <button onClick={() => setPreviewUnit(u)} className="text-gray-400 hover:text-gray-600">
@@ -909,7 +909,7 @@ export default function EquipmentPage() {
                       <select className="text-xs border border-gray-200 rounded-lg px-2 py-1 flex-1" value={u.status} onChange={(e) => handleStatusChange(u, e.target.value)}>
                         {ALL_STATUSES.map((s) => <option key={s}>{s}</option>)}
                       </select>
-                      <button onClick={() => openEdit(u)} className="text-xs text-primary-500 hover:underline px-2">Edit</button>
+                      <button onClick={() => openEdit(u)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline px-2">Edit</button>
                     </div>
                     {(() => {
                       const li = getLeaseInfo(u);

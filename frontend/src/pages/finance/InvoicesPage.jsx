@@ -671,7 +671,7 @@ export default function InvoicesPage() {
                                 </td>
                                 <td className="px-5 py-3">
                                   <div className="flex items-center gap-2">
-                                    <button onClick={() => openLeaseInvEdit(inv)} className="text-xs text-primary-500 hover:underline">Edit</button>
+                                    <button onClick={() => openLeaseInvEdit(inv)} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Edit</button>
                                     {['Draft','Sent'].includes(inv.status) && (
                                       <button onClick={() => markLeaseInvPaid(inv)}
                                         className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg flex items-center gap-1">
