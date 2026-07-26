@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { canAccess } from "../../lib/rolePermissions";
 import {
@@ -19,7 +19,7 @@ import {
   Building2,
   KeyRound,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { useNotifications } from "../../context/NotificationContext";
 import SidebarLogoHover from "./SidebarLogoHover";
@@ -78,9 +78,28 @@ const NAV_ITEMS = [
 export default function Sidebar() {
   const { profile, role, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const { notifications } = useNotifications();
   const unreadChatCount = notifications.filter(n => n.type === 'chat' && !n.is_read).length;
+
+  // Route-change → sidebar-logo replay. Each pathname change bumps a counter
+  // that `SidebarLogoHover` watches; the counter (rather than pathname
+  // itself) means back-navigation to the same path still counts, and the
+  // component's own `phase !== "idle"` guard coalesces rapid consecutive
+  // navigations so the animation is never restarted mid-flight. The very
+  // first mount is intentionally skipped — the loading screen already runs
+  // the same animation on the first paint, and re-running it as the login
+  // page mounts would double-play. Subsequent pathname changes (every
+  // in-app navigation from that point on) trigger the replay, which runs
+  // in parallel with whatever skeleton loader the destination page shows.
+  const [navTick, setNavTick] = useState(0);
+  const lastPathRef = useRef(location.pathname);
+  useEffect(() => {
+    if (lastPathRef.current === location.pathname) return;
+    lastPathRef.current = location.pathname;
+    setNavTick((n) => n + 1);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -101,7 +120,7 @@ export default function Sidebar() {
           animation (wedge → J → T → C → red-dot flourish); see
           SidebarLogoHover.jsx. */}
       <div className="flex items-center justify-center px-4 h-16 border-b border-gray-100">
-        <SidebarLogoHover collapsed={collapsed} />
+        <SidebarLogoHover collapsed={collapsed} trigger={navTick} />
       </div>
 
       {/* Nav */}

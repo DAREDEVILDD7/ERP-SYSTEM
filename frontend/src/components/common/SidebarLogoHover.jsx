@@ -300,7 +300,7 @@ function buildWedgeAnim(phase) {
   };
 }
 
-export default function SidebarLogoHover({ collapsed }) {
+export default function SidebarLogoHover({ collapsed, trigger }) {
   const reducedMotion = useReducedMotion();
   const [phase, setPhase] = useState("idle");
   // A single timer handle so a component-unmount mid-flight cancels the
@@ -313,6 +313,23 @@ export default function SidebarLogoHover({ collapsed }) {
     if (phase !== "idle" || reducedMotion) return;
     setPhase("wedgeLeft");
   }, [phase, reducedMotion]);
+
+  // Externally-triggered replay: when the parent bumps the `trigger` value
+  // (Sidebar does this on every route change so the logo doubles as a
+  // navigation loading indicator), kick off the identical hover sequence.
+  // The existing `phase !== "idle"` guard inside `startAnimation` makes
+  // rapid consecutive navigations coalesce — a second click while the
+  // animation is still in flight is silently ignored, exactly matching
+  // the hover debounce. `undefined` (initial mount when no trigger prop
+  // is passed, or the very first render before any navigation) is
+  // skipped so the logo doesn't animate on page load.
+  const prevTriggerRef = useRef(trigger);
+  useEffect(() => {
+    if (trigger === undefined) return;
+    if (prevTriggerRef.current === trigger) return;
+    prevTriggerRef.current = trigger;
+    startAnimation();
+  }, [trigger, startAnimation]);
 
   useEffect(() => {
     if (timerRef.current) {
