@@ -102,7 +102,7 @@ export default function MaintenanceDashboard() {
       <div className="space-y-6 mx-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-rose-700 via-red-600 to-orange-500 p-6 text-white shadow-lg mx-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg mx-up">
           <div className="absolute -top-14 -right-14 w-60 h-60 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-8 w-44 h-44 rounded-full bg-white/5 pointer-events-none" />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
@@ -111,9 +111,9 @@ export default function MaintenanceDashboard() {
                 <Hammer size={22} className="text-white" />
               </div>
               <div>
-                <p className="text-red-100 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Maintenance Engineer'}</h1>
-                <p className="text-red-100 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · Maintenance Hub
                 </p>
               </div>
@@ -122,13 +122,13 @@ export default function MaintenanceDashboard() {
               {stats.open > 0 && (
                 <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center mx-pop mx-pulse" style={{ animationDelay: '180ms' }}>
                   <p className="text-xl font-bold leading-none">{stats.open}</p>
-                  <p className="text-red-100 text-xs mt-1">Open Jobs</p>
+                  <p className="text-white/70 text-xs mt-1">Open Jobs</p>
                 </div>
               )}
               {overdue.length > 0 && (
-                <div className="bg-red-900/40 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center mx-pop" style={{ animationDelay: '230ms' }}>
+                <div className="bg-black/30 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center mx-pop" style={{ animationDelay: '230ms' }}>
                   <p className="text-xl font-bold leading-none">{overdue.length}</p>
-                  <p className="text-red-200 text-xs mt-1">Overdue</p>
+                  <p className="text-white/80 text-xs mt-1">Overdue</p>
                 </div>
               )}
               <button onClick={() => load(true)} disabled={refreshing}

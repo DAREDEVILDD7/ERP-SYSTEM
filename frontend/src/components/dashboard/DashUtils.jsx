@@ -8,7 +8,7 @@ export const TOOLTIP_STYLE = {
   WebkitBackdropFilter: 'blur(14px) saturate(180%)',
   borderRadius: 12,
   border: '1px solid rgba(255, 255, 255, 0.65)',
-  boxShadow: '0 4px 24px rgba(99,102,241,0.14), 0 1px 4px rgba(0,0,0,0.05)',
+  boxShadow: '0 4px 24px rgba(238,28,37,0.12), 0 1px 4px rgba(0,0,0,0.05)',
   fontSize: 12,
   color: '#334155',
   padding: '8px 14px',

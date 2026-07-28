@@ -128,28 +128,28 @@ export default function ProcurementDashboard() {
       <div className="space-y-6 pm-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-blue-500 p-6 text-white shadow-lg pm-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg pm-up">
           <div className="absolute -top-12 -right-12 w-56 h-56 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-8 w-40 h-40 rounded-full bg-white/5 pointer-events-none" />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-indigo-200 text-sm">{greeting},</p>
+              <p className="text-white/70 text-sm">{greeting},</p>
               <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Procurement Manager'}</h1>
-              <p className="text-indigo-200 text-sm mt-1">
+              <p className="text-white/70 text-sm mt-1">
                 {format(new Date(), 'EEEE, dd MMMM yyyy')} · Procurement Control Center
               </p>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {stats.pendingApproval > 0 && (
-                <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center pm-pop" style={{ animationDelay: '200ms' }}>
+                <div className="bg-amber-400/25 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center pm-pop" style={{ animationDelay: '200ms' }}>
                   <p className="text-2xl font-bold leading-none">{stats.pendingApproval}</p>
-                  <p className="text-indigo-100 text-xs mt-1">Awaiting Approval</p>
+                  <p className="text-amber-100 text-xs mt-1">Awaiting Approval</p>
                 </div>
               )}
               {stats.overdueDeliveries > 0 && (
-                <div className="bg-red-500/30 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center pm-pop pm-pulse" style={{ animationDelay: '270ms' }}>
+                <div className="bg-black/30 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center pm-pop pm-pulse" style={{ animationDelay: '270ms' }}>
                   <p className="text-2xl font-bold leading-none">{stats.overdueDeliveries}</p>
-                  <p className="text-red-100 text-xs mt-1">Overdue POs</p>
+                  <p className="text-white/80 text-xs mt-1">Overdue POs</p>
                 </div>
               )}
               <button onClick={() => load(true)} disabled={refreshing}

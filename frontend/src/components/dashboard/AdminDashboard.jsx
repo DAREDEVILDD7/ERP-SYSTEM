@@ -93,7 +93,7 @@ export default function AdminDashboard() {
       <div className="space-y-6 ad-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-slate-600 p-6 text-white shadow-lg ad-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg ad-up">
           <div className="absolute -top-14 -right-14 w-64 h-64 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute top-6 right-36 w-20 h-20 rounded-full bg-white/5 pointer-events-none" />
           <div className="absolute -bottom-12 -left-8 w-44 h-44 rounded-full bg-white/5 pointer-events-none" />
@@ -103,9 +103,9 @@ export default function AdminDashboard() {
                 <ShieldCheck size={22} className="text-white" />
               </div>
               <div>
-                <p className="text-blue-200 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Admin'}</h1>
-                <p className="text-blue-200 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · System Command Center
                 </p>
               </div>
@@ -116,7 +116,7 @@ export default function AdminDashboard() {
                   <TrendingUp size={13} className="text-green-300" />
                   <p className="text-xl font-bold leading-none">{stats.totalRevenue.toLocaleString()}</p>
                 </div>
-                <p className="text-blue-200 text-xs mt-1">KWD Revenue</p>
+                <p className="text-white/70 text-xs mt-1">KWD Revenue</p>
               </div>
               {stats.openMaintenance > 0 && (
                 <div className="bg-amber-400/25 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center ad-pop ad-pulse" style={{ animationDelay: '240ms' }}>

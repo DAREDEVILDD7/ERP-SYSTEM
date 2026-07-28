@@ -100,7 +100,7 @@ export default function WarehouseDashboard() {
       <div className="space-y-6 wh-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-600 via-orange-500 to-yellow-500 p-6 text-white shadow-lg wh-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg wh-up">
           <div className="absolute -top-14 -right-14 w-60 h-60 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-8 w-44 h-44 rounded-full bg-white/5 pointer-events-none" />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
@@ -109,9 +109,9 @@ export default function WarehouseDashboard() {
                 <Archive size={22} className="text-white" />
               </div>
               <div>
-                <p className="text-orange-100 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Warehouse Operator'}</h1>
-                <p className="text-orange-100 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · Inventory Hub
                 </p>
               </div>
@@ -119,11 +119,11 @@ export default function WarehouseDashboard() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center wh-pop" style={{ animationDelay: '180ms' }}>
                 <p className="text-xl font-bold leading-none">{utilisation}%</p>
-                <p className="text-orange-100 text-xs mt-1">Fleet Utilisation</p>
+                <p className="text-white/70 text-xs mt-1">Fleet Utilisation</p>
               </div>
               <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center wh-pop" style={{ animationDelay: '230ms' }}>
                 <p className="text-xl font-bold leading-none">{stats.reserved}</p>
-                <p className="text-orange-100 text-xs mt-1">Reserved</p>
+                <p className="text-white/70 text-xs mt-1">Reserved</p>
               </div>
               <button onClick={() => load(true)} disabled={refreshing}
                 className="bg-white/15 hover:bg-white/25 backdrop-blur-sm rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm transition-colors disabled:opacity-60">

@@ -104,7 +104,7 @@ export default function SalesDashboard() {
       <div className="space-y-6 sa-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-700 via-violet-600 to-indigo-500 p-6 text-white shadow-lg sa-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg sa-up">
           <div className="absolute -top-14 -right-14 w-60 h-60 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute top-4 right-32 w-20 h-20 rounded-full bg-white/5 pointer-events-none" />
           <div className="absolute -bottom-10 -left-8 w-44 h-44 rounded-full bg-white/5 pointer-events-none" />
@@ -114,22 +114,22 @@ export default function SalesDashboard() {
                 <TrendingUp size={22} className="text-white" />
               </div>
               <div>
-                <p className="text-purple-200 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Sales Executive'}</h1>
-                <p className="text-purple-200 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · Sales Hub
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {stats.pendingApproval > 0 && (
-                <div className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center sa-pop sa-pulse" style={{ animationDelay: '180ms' }}>
+                <div className="bg-amber-400/25 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center sa-pop sa-pulse" style={{ animationDelay: '180ms' }}>
                   <p className="text-xl font-bold leading-none">{stats.pendingApproval}</p>
-                  <p className="text-purple-100 text-xs mt-1">Awaiting Approval</p>
+                  <p className="text-amber-100 text-xs mt-1">Awaiting Approval</p>
                 </div>
               )}
               <button onClick={() => navigate('/requirements')}
-                className="bg-white text-purple-700 font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm hover:bg-purple-50 transition-colors sa-pop"
+                className="bg-white text-primary-700 font-semibold rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm hover:bg-primary-50 transition-colors sa-pop"
                 style={{ animationDelay: '230ms' }}>
                 <Plus size={14} /> New Requirement
               </button>

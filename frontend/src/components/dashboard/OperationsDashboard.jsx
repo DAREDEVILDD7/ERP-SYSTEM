@@ -107,7 +107,7 @@ export default function OperationsDashboard() {
       <div className="space-y-6 op-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-teal-700 via-teal-600 to-cyan-500 p-6 text-white shadow-lg op-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg op-up">
           <div className="absolute -top-14 -right-14 w-60 h-60 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute top-4 right-32 w-20 h-20 rounded-full bg-white/5 pointer-events-none" />
           <div className="absolute -bottom-12 -left-8 w-48 h-48 rounded-full bg-white/5 pointer-events-none" />
@@ -117,18 +117,18 @@ export default function OperationsDashboard() {
                 <Layers size={22} className="text-white" />
               </div>
               <div>
-                <p className="text-teal-100 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Operations Manager'}</h1>
-                <p className="text-teal-100 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · Operations Center
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {stats.pendingReview > 0 && (
-                <div className="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center op-pop op-pulse" style={{ animationDelay: '180ms' }}>
+                <div className="bg-amber-400/25 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center op-pop op-pulse" style={{ animationDelay: '180ms' }}>
                   <p className="text-xl font-bold leading-none">{stats.pendingReview}</p>
-                  <p className="text-teal-100 text-xs mt-1">Needs Review</p>
+                  <p className="text-amber-100 text-xs mt-1">Needs Review</p>
                 </div>
               )}
               <button onClick={() => navigate('/requirements')}

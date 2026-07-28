@@ -103,7 +103,7 @@ export default function DispatchDashboard() {
       <div className="space-y-6 ds-fade">
 
         {/* Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-500 p-6 text-white shadow-lg ds-up">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-700 via-primary-600 to-gray-900 p-6 text-white shadow-lg ds-up">
           <div className="absolute -top-14 -right-14 w-60 h-60 rounded-full bg-white/10 pointer-events-none" />
           <div className="absolute -bottom-10 -left-8 w-40 h-40 rounded-full bg-white/5 pointer-events-none" />
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
@@ -112,9 +112,9 @@ export default function DispatchDashboard() {
                 <Truck size={22} className="text-white ds-drive" />
               </div>
               <div>
-                <p className="text-indigo-200 text-sm">{greeting},</p>
+                <p className="text-white/70 text-sm">{greeting},</p>
                 <h1 className="text-2xl font-bold mt-0.5">{profile?.name ?? 'Dispatch Coordinator'}</h1>
-                <p className="text-indigo-200 text-sm mt-0.5">
+                <p className="text-white/70 text-sm mt-0.5">
                   {format(new Date(), 'EEEE, dd MMMM yyyy')} · Dispatch Control
                 </p>
               </div>
@@ -123,10 +123,10 @@ export default function DispatchDashboard() {
               {stats.inTransit > 0 && (
                 <div className="bg-white/15 backdrop-blur-sm rounded-xl px-4 py-2.5 text-center ds-pop" style={{ animationDelay: '200ms' }}>
                   <div className="flex items-center justify-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-300 ds-pulse" />
+                    <span className="w-2 h-2 rounded-full bg-white ds-pulse" />
                     <p className="text-xl font-bold leading-none">{stats.inTransit}</p>
                   </div>
-                  <p className="text-indigo-200 text-xs mt-1">In Transit</p>
+                  <p className="text-white/70 text-xs mt-1">In Transit</p>
                 </div>
               )}
               {stats.pending > 0 && (
