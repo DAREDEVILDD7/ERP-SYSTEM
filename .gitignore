@@ -18,3 +18,6 @@ backend/.env
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code — local model guidance, not shared with the team
+CLAUDE.md
