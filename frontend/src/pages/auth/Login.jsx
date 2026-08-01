@@ -8,14 +8,17 @@ import { submitPasswordResetRequest } from '../../api/passwordResetRequests';
 /* ---------------------------------------------------------------------------
  * Post-dock UI reveal (added on top of the already-approved logo dock).
  *
- * Once the loading animation's logo lands in `logoSlotRef` below (signaled
- * by `dock.revealed`), the JTC logo shows immediately but everything else on
- * this page - heading, subtitle, the card/form, the "Forgot password" link,
- * the footer - stays invisible for one short beat, then cascades in. This is
- * purely a presentation-timing layer: no layout, structure, or class changes
- * to the elements it applies to (all still render, in their normal flow
- * position, the whole time - only their `opacity`/`transform` are toggled),
- * so nothing about the page can jump or shift when it reveals.
+ * Once the loading animation's logo has landed in `logoSlotRef` below
+ * (signalled by `dock.revealed`), the overlay's parked logo instance is
+ * still the visible logo (this page's own `<img>` stays hidden - see
+ * `dock.logoVisible`, flipped only at retirement) and everything else on
+ * this page - heading, subtitle, the card/form, the "Forgot password"
+ * link, the footer - stays invisible for one short beat, then cascades
+ * in. This is purely a presentation-timing layer: no layout, structure
+ * or class changes to the elements it applies to (all still render, in
+ * their normal flow position, the whole time - only their `opacity` /
+ * `transform` are toggled), so nothing about the page can jump or shift
+ * when it reveals.
  * ------------------------------------------------------------------------- */
 const UI_REVEAL_DELAY_MS = 180; // pause after the logo lands, logo-alone
 const UI_REVEAL_STEP_MS  = 60;  // stagger between each successive element
@@ -142,25 +145,36 @@ export default function Login() {
 
   // Bridges to AppLoadingGate (src/components/loading), which drives the
   // loading animation's already-assembled logo into this exact box the
-  // moment it finishes, then flips this static image to visible in the
-  // same spot. Outside that wrapper (dock === null) the logo just shows.
+  // moment it finishes. That overlay instance then PARKS here and remains
+  // the one visible logo; this static image stays hidden (`logoVisible`
+  // false) until the gate retires the overlay at an imperceptible moment
+  // (this page unmounting after sign-in, or a resize/scroll). Outside the
+  // wrapper (dock === null) the logo just shows.
   const dock = useContext(LogoDockContext);
+  const registerSlot = dock?.registerSlot;
   const logoSlotRef = useRef(null);
+  // Depends on the gate's stable registerSlot callback - NOT on the whole
+  // context value - so `revealed`/`logoVisible` flips can never churn an
+  // unregister/re-register here. The slot is registered exactly once and
+  // unregistered only when this page truly unmounts, which is the signal
+  // the gate uses to retire its parked overlay logo.
   useEffect(() => {
-    dock?.registerSlot(logoSlotRef.current);
-    return () => dock?.registerSlot(null);
-  }, [dock]);
+    if (!registerSlot) return undefined;
+    registerSlot(logoSlotRef.current);
+    return () => registerSlot(null);
+  }, [registerSlot]);
 
   // Rest of the UI (heading/subtitle/card/link/footer): revealed a short
   // beat after the logo lands. With no AppLoadingGate present at all (dock
   // === null - e.g. an isolated render), there is no dock signal to wait
   // for, so it shows immediately rather than staying hidden forever.
+  const dockRevealed = !!dock?.revealed;
   const [uiRevealed, setUiRevealed] = useState(() => !dock);
   useEffect(() => {
-    if (!dock?.revealed) return;
+    if (!dockRevealed) return;
     const id = window.setTimeout(() => setUiRevealed(true), UI_REVEAL_DELAY_MS);
     return () => window.clearTimeout(id);
-  }, [dock]);
+  }, [dockRevealed]);
 
   const revealStyle = (step) => ({
     opacity: uiRevealed ? 1 : 0,
@@ -216,11 +230,14 @@ export default function Login() {
                 width: '100%',
                 height: '100%',
                 display: 'block',
-                opacity: dock ? (dock.revealed ? 1 : 0) : 1,
+                // Hidden while the gate's parked overlay logo (the same
+                // instance the user watched assemble and glide in) is the
+                // visible logo; takes over only at the gate's atomic,
+                // imperceptible retirement swap.
+                opacity: dock ? (dock.logoVisible ? 1 : 0) : 1,
               }}
             />
           </div>
-          {/* <h1 className="text-2xl font-semibold text-black" style={revealStyle(0)}>JTC Ops Portal</h1> */}
           <p className="text-sm text-gray-500 mt-1" style={revealStyle(0)}>Sign in to continue</p>
         </div>
 

@@ -10,7 +10,13 @@ import "./jtc-loading.css";
  * nothing about the animation itself (no timing, motion, easing, asset or
  * styling decision lives here) - its only job is:
  *   1. Show JTCLogoAnimation full-screen, on top of everything, the instant
- *      the app boots.
+ *      the app boots. The welcome plays on the FIRST load of the tab
+ *      unconditionally (regardless of the landing URL), and then re-plays
+ *      only when the user REFRESHES /login. Refreshing or deep-linking to
+ *      any other route (/dashboard, an admin page, etc.) after that first
+ *      load skips the animation entirely: the gate returns children
+ *      directly, no overlay is mounted, no assets preload, no dock provider
+ *      is exposed.
  *   2. Let the real app mount underneath at the same time (so auth/session
  *      restore already runs while the animation plays instead of only
  *      starting after it).
@@ -21,11 +27,18 @@ import "./jtc-loading.css";
  *      motion while the opaque cover dissolves around it, so the loading
  *      screen and the login page read as a single uninterrupted animation
  *      rather than two screens with a cut between them.
- *   4. Once docked, flip the login page's own static logo to visible in
- *      that same spot (same asset, same position/size - imperceptible) and
- *      unmount the overlay a beat later, by which point its background is
- *      already fully transparent and there is nothing left to visibly
- *      remove.
+ *   4. Once docked, the overlay - and with it the EXACT logo instance the
+ *      user has been watching since the first loading frame - stays
+ *      mounted, parked over the login slot, while the login UI reveals
+ *      beneath it. The login page's own static logo stays hidden. There is
+ *      no unmount, no remount, no swap and no opacity change of any logo
+ *      element at the landing instant, so there is nothing that can
+ *      flicker. The overlay is only "retired" (static logo revealed +
+ *      overlay removed, atomically in one React commit) at a moment where
+ *      that single swap frame physically cannot be perceived: the login
+ *      page unmounting after a successful sign-in, or a resize / rotation /
+ *      scroll - events the parked position:fixed logo could not track
+ *      anyway - whose own reflow hides the frame.
  *   5. Never show the loading screen again for the lifetime of this page
  *      load: it is mounted exactly once, in src/index.js, above <App />.
  *      A client-side route change (e.g. login -> dashboard) never remounts
@@ -76,6 +89,24 @@ function markLoadingPlayed() {
     // Failing to persist just means the next reload will replay — harmless.
   }
 }
+
+// Login-page refresh detection. Read against the URL the browser actually
+// loaded (window.location, synchronously at gate mount - before
+// BrowserRouter has resolved anything), so it reflects the true HTTP load
+// target and cannot be confused with a later client-side navigation. Only
+// consulted for SUBSEQUENT loads in the tab (i.e. once the once-per-session
+// flag is already set); the very first load in the tab always plays the
+// animation, whatever the initial URL, so app-boot behaviour is preserved.
+const LOGIN_PATH = "/login";
+function initialPathIsLogin() {
+  try {
+    return window.location.pathname === LOGIN_PATH;
+  } catch (_) {
+    // Non-browser environments (SSR test harness, etc.) - safest to skip
+    // rather than force the animation onto a page that can't host it.
+    return false;
+  }
+}
 // Reduced-motion users get the component's own static-logo fallback frame
 // (unchanged), just for a short, fixed grace period instead of forever - the
 // ported component intentionally never advances its phase machine in that
@@ -83,11 +114,6 @@ function markLoadingPlayed() {
 const REDUCED_MOTION_GRACE_MS = 500;
 // Fallback-path fade (used only when there is no dock target to fly to).
 const FADE_MS = 220;
-// After the dock transform lands, give the login page's own static logo one
-// paint to appear in the exact same spot before the (by-then fully
-// transparent) overlay is removed - belt-and-suspenders against any single-
-// frame timing jitter between the two.
-const POST_DOCK_MS = 60;
 
 class LoadingErrorBoundary extends Component {
   constructor(props) {
@@ -108,27 +134,77 @@ class LoadingErrorBoundary extends Component {
 }
 
 export default function AppLoadingGate({ children }) {
-  // Decide once, at mount, whether this browser session has already seen the
-  // welcome animation. Reading sessionStorage lazily inside useState avoids
-  // both the flicker of an "always mount, then hide" approach and any React
-  // re-render triggering a replay: a refresh, route change, or component
-  // remount all read the persisted flag on the first render and short-circuit
-  // straight to `skip = true`, so the animation branch below is never even
-  // mounted on subsequent visits within the same tab.
-  const [skip] = useState(loadingAlreadyPlayed);
+  // Decide once, at mount, whether to skip the welcome animation entirely.
+  // Evaluated lazily inside useState so no render / route change / remount
+  // can re-arm it after the gate has decided:
+  //   - First load in this tab (sessionStorage flag not yet set): PLAY,
+  //     regardless of the landing URL. This is the original app-boot
+  //     behaviour and covers a fresh tab opening on /login, on /dashboard
+  //     via a valid session, on a deep-linked route, etc.
+  //   - Subsequent load in this tab (flag already set): a refresh or hard
+  //     navigation. PLAY only when the initial URL is /login (the user has
+  //     refreshed the login page); SKIP for every other path (refreshing
+  //     /dashboard, /procurement, an admin page, etc.). Client-side pushes
+  //     within the same tab (Sign Out → /login, session-expiry redirect
+  //     to /login) do NOT remount the gate and therefore cannot re-trigger
+  //     the animation - the gate is mounted exactly once, above the router
+  //     in src/index.js.
+  const [skip] = useState(() => {
+    if (!loadingAlreadyPlayed()) return false;
+    return !initialPathIsLogin();
+  });
 
   const [visible, setVisible] = useState(!skip);
   const [fading, setFading] = useState(false); // fallback-path fade only
   const [dockRect, setDockRect] = useState(null);
-  const [revealed, setRevealed] = useState(false); // login's own static logo should show
+  // The dock transform has landed: the login page may start its staged UI
+  // reveal beneath the parked overlay logo.
+  const [revealed, setRevealed] = useState(false);
+  // The login page's own static logo should render. Deliberately a SEPARATE
+  // signal from `revealed`: the overlay's assembled pieces remain the one
+  // and only visible logo instance from the first loading frame, through
+  // the dock glide, and across the entire login UI reveal. The static image
+  // takes over only at retirement (see retireOverlay below).
+  const [logoVisible, setLogoVisible] = useState(false);
+  const [docked, setDocked] = useState(false); // landing confirmed - overlay is now just a parked logo
 
   const assembledRef = useRef(false); // guards handleAssembled against double calls
-  const finishedRef = useRef(false); // guards the final unmount against double calls
+  const finishedRef = useRef(false); // dock landed OR fallback taken - each blocks the other path
+  const retiredRef = useRef(false); // overlay permanently removed - guards retirement against double calls
   const slotRef = useRef(null);
+
+  // Retire the overlay: reveal the login page's static logo and remove the
+  // overlay in the SAME React commit (both states live here and React
+  // batches them), so the swap between the two pixel-aligned, same-art
+  // renderings is one single frame with no gap and no stacked duplicate.
+  // Crucially this is only ever invoked at moments where even that one
+  // frame cannot be seen - never while the user is watching the logo sit
+  // still on an otherwise idle login page.
+  const retireOverlay = useCallback(() => {
+    if (retiredRef.current) return;
+    retiredRef.current = true;
+    finishedRef.current = true;
+    markLoadingPlayed();
+    setLogoVisible(true);
+    setRevealed(true);
+    setVisible(false);
+  }, []);
 
   const registerSlot = useCallback((el) => {
     slotRef.current = el;
-  }, []);
+    // Slot unregistered after the hand-off began => the login page is
+    // unmounting (successful sign-in navigating away). The overlay's fixed
+    // logo must not linger over the next screen, so retire it. Deferred one
+    // microtask so an unregister/re-register churn inside a single commit
+    // (StrictMode double-invoke, an effect re-run) is not mistaken for a
+    // real unmount - by the time the microtask runs, a churn has already
+    // re-registered the slot and the retirement is skipped.
+    if (!el && assembledRef.current) {
+      Promise.resolve().then(() => {
+        if (!slotRef.current) retireOverlay();
+      });
+    }
+  }, [retireOverlay]);
 
   // Fallback path: no dock target available (or an error/timeout/reduced-
   // motion case) - just fade the whole cover away, exactly as before. Also
@@ -138,7 +214,9 @@ export default function AppLoadingGate({ children }) {
   const fallbackFinish = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    retiredRef.current = true; // no parked logo on this path - nothing left to retire
     markLoadingPlayed();
+    setLogoVisible(true);
     setRevealed(true);
     setFading(true);
     window.setTimeout(() => setVisible(false), FADE_MS);
@@ -157,13 +235,47 @@ export default function AppLoadingGate({ children }) {
   }, [fallbackFinish]);
 
   // Fires once, when the logo has physically landed in the login slot.
+  // Nothing is unmounted, recreated, swapped, faded or re-styled at this
+  // instant: the overlay - and with it the exact logo instance that just
+  // glided in - simply stays where it is, and `revealed` lets the login UI
+  // cascade in beneath it. With no DOM mutation touching the logo at the
+  // landing moment, there is nothing that can flicker, redraw or shift.
   const handleDocked = useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
     markLoadingPlayed();
+    setDocked(true);
     setRevealed(true);
-    window.setTimeout(() => setVisible(false), POST_DOCK_MS);
+    // Nudge the (still hidden, already preloaded) static logo image to
+    // decode now, in the background, so the eventual retirement swap can
+    // never paint a blank frame while the browser lazily decodes it.
+    try {
+      slotRef.current?.querySelector?.("img")?.decode?.().catch(() => {});
+    } catch (_) {
+      // best-effort optimisation only - retirement still works without it
+    }
   }, []);
+
+  // The parked overlay logo is position:fixed, so it cannot track the login
+  // slot through any layout change. A resize, an orientation change, or a
+  // scroll (e.g. the login page overflowing a short viewport) therefore
+  // retires it immediately - the swap frame is hidden inside the reflow /
+  // scroll repaint the browser is performing at that same moment, and the
+  // static in-flow logo takes over tracking the layout from then on. Armed
+  // from the instant the dock glide starts, so even a resize that lands
+  // mid-flight resolves to a correctly positioned logo.
+  useEffect(() => {
+    if (!dockRect || !visible) return undefined;
+    const onLayoutChange = () => retireOverlay();
+    window.addEventListener("resize", onLayoutChange);
+    window.addEventListener("orientationchange", onLayoutChange);
+    window.addEventListener("scroll", onLayoutChange, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("resize", onLayoutChange);
+      window.removeEventListener("orientationchange", onLayoutChange);
+      window.removeEventListener("scroll", onLayoutChange, { capture: true });
+    };
+  }, [dockRect, visible, retireOverlay]);
 
   useEffect(() => {
     // Nothing to time out or grace-period when the animation isn't going to
@@ -187,8 +299,8 @@ export default function AppLoadingGate({ children }) {
   }, [fallbackFinish, skip]);
 
   const dockContextValue = useMemo(
-    () => ({ registerSlot, revealed }),
-    [registerSlot, revealed],
+    () => ({ registerSlot, revealed, logoVisible }),
+    [registerSlot, revealed, logoVisible],
   );
 
   // Subsequent visits within the same browser session: the animation already
@@ -207,7 +319,13 @@ export default function AppLoadingGate({ children }) {
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 2147483647,
+            // While the animation plays the overlay must cover everything;
+            // once the logo has parked it is nothing but a passive logo
+            // layer over an interactive page, so it drops below the app's
+            // dialog/toast layers (the login page's modal renders at z-50)
+            // while staying above the page content. A z-index change alone
+            // repaints nothing - the logo pixels are untouched by it.
+            zIndex: docked ? 10 : 2147483647,
             opacity: fading ? 0 : 1,
             transition: fading ? `opacity ${FADE_MS}ms ease-out` : undefined,
             // once a dock target is found, the real page is being revealed
