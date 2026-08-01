@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { getCustomers, createCustomer, updateCustomer } from '../../api/customers';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
@@ -22,7 +23,8 @@ export default function CustomersPage() {
   const [form,        setForm]        = useState(EMPTY);
   const [formLoading, setFormLoading] = useState(false);
 
-  const canWrite = hasPermission(role, 'customers_write');
+  const { canEdit } = usePermissions();
+  const canWrite = hasPermission(role, 'customers_write') && canEdit('customers');
 
   const load = useCallback(async () => {
     setLoading(true);

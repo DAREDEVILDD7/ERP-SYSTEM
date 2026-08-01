@@ -1,6 +1,6 @@
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { canAccess } from "../../lib/rolePermissions";
+import { usePermissions } from "../../context/PermissionsContext";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -18,6 +18,7 @@ import {
   ShoppingCart,
   Building2,
   KeyRound,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
@@ -73,10 +74,17 @@ const NAV_ITEMS = [
     icon: ScrollText,
     path: "/audit-logs",
   },
+  {
+    key: "permissions",
+    label: "Roles & Permissions",
+    icon: ShieldCheck,
+    path: "/permissions",
+  },
 ];
 
 export default function Sidebar() {
-  const { profile, role, logout } = useAuth();
+  const { profile, logout } = useAuth();
+  const { canAccessModule, canResetPasswords } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -106,7 +114,13 @@ export default function Sidebar() {
     navigate("/login");
   };
 
-  const visible = NAV_ITEMS.filter((item) => canAccess(role, item.key));
+  // "password-reset-requests" is individually grantable on top of the
+  // coarse per-role module access (off for every Admin by default) - so it
+  // needs the extra canResetPasswords check the other nav items don't.
+  const visible = NAV_ITEMS.filter((item) =>
+    canAccessModule(item.key) &&
+    (item.key !== 'password-reset-requests' || canResetPasswords)
+  );
 
   return (
     <aside

@@ -124,6 +124,20 @@ export function AuthProvider({ children }) {
     return userProfile;
   }, []);
 
+  // ── live role refresh (called by PermissionsContext) ──────────────────────
+  // If a Super Admin changes THIS signed-in user's own role, PermissionsContext
+  // detects it (it already watches the current user's `users` row for the
+  // is_active/logout check) and calls this so DashboardRouter re-renders with
+  // the new role immediately - no logout/re-login required.
+  const updateProfileRole = useCallback((newRole) => {
+    setProfile(p => {
+      if (!p || p.role === newRole) return p;
+      const next = { ...p, role: newRole };
+      saveSession(next);
+      return next;
+    });
+  }, []);
+
   // ── logout ────────────────────────────────────────────────────────────────
   const logout = useCallback(() => {
     const logId = loadSessionLogId();
@@ -155,14 +169,20 @@ export function AuthProvider({ children }) {
   }, [profile]);
 
   // ── admin: reset any user's password ─────────────────────────────────────
+  // Server-verified: admin_reset_user_password re-checks the caller's actual
+  // permission (Super Admin, or an Admin explicitly granted the
+  // "password_reset" override) and the target's role fresh from the
+  // database - it does not trust the client-side profile at all beyond
+  // identifying who is asking. See add_super_admin_rbac.sql.
   const adminResetPassword = useCallback(async (userId, newPassword) => {
-    if (profile?.role !== "Admin") throw new Error("Admin access required.");
+    if (!profile?.user_id) throw new Error("Not logged in.");
     if (!newPassword || newPassword.length < 6) {
       throw new Error("Password must be at least 6 characters.");
     }
 
-    const { data, error } = await supabase.rpc("set_user_password", {
-      p_user_id:      userId,
+    const { data, error } = await supabase.rpc("admin_reset_user_password", {
+      p_actor_id:     profile.user_id,
+      p_target_id:    userId,
       p_new_password: newPassword,
     });
 
@@ -183,7 +203,9 @@ export function AuthProvider({ children }) {
         logout,
         changePassword,
         adminResetPassword,
-        isAdmin:            profile?.role === "Admin",
+        updateProfileRole,
+        isAdmin:            profile?.role === "Admin" || profile?.role === "Super Admin",
+        isSuperAdmin:       profile?.role === "Super Admin",
       }}
     >
       {children}

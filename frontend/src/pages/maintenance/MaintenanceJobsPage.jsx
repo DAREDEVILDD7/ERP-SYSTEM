@@ -7,6 +7,7 @@ import {
 import { getEquipmentUnits } from '../../api/equipment';
 import { getUsers } from '../../api/users';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
 import { SkeletonTable } from '../../components/common/Skeleton';
@@ -52,8 +53,9 @@ export default function MaintenanceJobsPage() {
   const [form,         setForm]         = useState(EMPTY);
   const [formLoading,  setFormLoading]  = useState(false);
 
-  const canWrite = hasPermission(role, 'maintenance_create');
-  const canApprove = hasPermission(role, 'maintenance_edit');
+  const { canEdit } = usePermissions();
+  const canWrite = hasPermission(role, 'maintenance_create') && canEdit('maintenance');
+  const canApprove = hasPermission(role, 'maintenance_edit') && canEdit('maintenance');
 
   const load = useCallback(async () => {
     if (authLoading || !profile || !role) return;

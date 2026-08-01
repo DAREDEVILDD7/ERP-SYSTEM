@@ -156,6 +156,31 @@ password manually via the existing user-management RPC.
     `AppLoadingGate.jsx` and `LogoDockContext.js` were spot-verified as
     referenced — nothing else in the three files touched this session
     qualifies as unused.
+  - `frontend/src/context/PermissionsContext.jsx` — removed the unused
+    `permissionsSource` field from the provider value (a full-tree
+    Grep confirms zero consumers), and wrapped the provider value in
+    `useMemo` so every `usePermissions()` consumer
+    (`Sidebar`/`MobileNav`/`ProtectedRoute` and every page that reads
+    permissions) only re-renders when the semantic value actually
+    changes. Previously the provider handed out a fresh object literal
+    on every render of `PermissionsProvider` itself — triggering a
+    cascade of no-op consumer re-renders on any internal state flip
+    (`rolePerms` / `moduleMap` / `overrides` / `moduleOverrides` /
+    `source`). The memo dependencies are the exact `useCallback`
+    references and primitives the value carries, so === identity is
+    correct and safe. Same pattern as the `LogoDockContext` memo
+    already used by `AppLoadingGate`. Pure re-render reduction; no
+    functional change.
+  - Follow-up audit after the User Permissions section, Super Admin
+    immunity fix, and server-side password-reset authorization landed:
+    every state / ref / callback / import in the files touched by those
+    changes was re-verified as referenced (12 lucide-react imports in
+    `UserManagement.jsx` all used; every `useMemo` hook consumed in
+    render; every new admin-API export has ≥1 consumer; every RPC
+    local variable declared in the two new SQL migrations is used).
+    No new dead code was introduced by any of those changes — nothing
+    to remove. ESLint clean on the three runtime files
+    (`PermissionsContext.jsx`, `api/admin.js`, `UserManagement.jsx`).
 
 - **Assets and imports kept intentionally**
   - `frontend/public/logo/*.svg` (dot, J-body, T-stem, T-bar, C, wedge,
@@ -414,11 +439,169 @@ password manually via the existing user-management RPC.
     password from inside the app but is no longer exposed on the login
     screen.
 
-- **RBAC** (`frontend/src/lib/rolePermissions.js`)
+- **RBAC** (`frontend/src/lib/rolePermissions.js`,
+  `frontend/src/context/PermissionsContext.jsx`,
+  `frontend/add_super_admin_rbac.sql`,
+  `frontend/add_user_module_overrides.sql`,
+  `frontend/fix_password_reset_authorization.sql`)
   - `Admin` role gains the `password-reset-requests` nav key and the
     `password_reset_admin` permission. No other role can list, view,
     complete, or reject password reset requests. The permission is
     re-checked server-side on every RPC.
+  - **Super Admin role added, plus a DB-backed permission layer on top
+    of the above.** `ROLES.SUPER_ADMIN` sits above `Admin` with
+    unconditional access everywhere (`fn_is_super_admin` on the DB
+    side; a `role === 'Super Admin'` bypass in `hasPermission`/
+    `canAccess`/`PermissionsContext`). **Immunity to Roles &
+    Permissions edits is complete on both sides.** The role×module
+    grid excludes `Super Admin` from `EDITABLE_ROLES`;
+    `admin_set_role_permission` raises when `p_role = 'Super Admin'`;
+    `admin_set_user_module_override` refuses `Super Admin` targets and
+    actor-on-self writes; `ProtectedRoute` already skips maintenance
+    mode for Super Admin; and `canAccessModule` now short-circuits to
+    true for Super Admin **before** consulting `isModuleEnabled`, so a
+    Super Admin disabling a module system-wide can never hide the
+    toggle (or any other module) from themselves. Together these
+    close every Roles-&-Permissions path that could have removed the
+    Super Admin's own access to the tool they use to manage the
+    permission model. The original static
+    `ROLE_NAV`/`PERMISSIONS` matrix in `rolePermissions.js` is
+    **untouched and still runs** — the new `PermissionsContext`
+    (three tables: `role_permissions`, `modules`,
+    `user_permission_overrides`) is **ANDed on top** of each page's
+    existing fine-grained check (`canWrite = hasPermission(role,
+    'x_create') && canEdit('module')`), never replacing it, so a
+    Super Admin can live-*restrict* a role/module but a bad DB row can
+    never grant more than the static matrix already allowed.
+    `ProtectedRoute`/`Sidebar`/`MobileNav` (which had only the coarse
+    `canAccess` check, nothing fine-grained to preserve) are a full
+    replacement — this also fixed a real pre-existing bug where
+    `ProtectedRoute`'s `navKey` prop was accepted but never read, so
+    every route was reachable by direct URL regardless of role.
+  - **"Reset Password" is now individually grantable**, off for every
+    Admin by default (`user_permission_overrides`, `permission_key =
+    'password_reset'`) — the Super Admin grants/revokes it per-Admin
+    from the new Roles & Permissions page. Gates both the
+    `PasswordResetRequests` page's render and its sidebar/mobile-nav
+    visibility.
+  - **Per-user module overrides** (new — extends the RBAC layer without
+    replacing any of it). New table `user_module_overrides
+    (user_id, module_key, can_view, can_edit)` in
+    `frontend/add_user_module_overrides.sql`, plus two new
+    Super-Admin-only `SECURITY DEFINER` RPCs:
+    `admin_set_user_module_override` (upsert; view=false coerces
+    edit=false at the storage layer) and
+    `admin_clear_user_module_override` (delete the row → "inherit from
+    role"). Both audit-log every change. The set RPC refuses to write
+    for the actor's own account or against a `Super Admin` target
+    (Super Admin's access is unconditional, so a row would be a silent
+    no-op — failing loud is clearer). `PermissionsContext`'s `canView` /
+    `canEdit` now evaluate in strict order **Super Admin → user
+    override → role permission → default deny**, exactly matching the
+    hierarchy in the product requirement. `user_module_overrides` was
+    added to `REALTIME_TABLES`, so a change made in the Super Admin's
+    User Management dialog reaches the affected user's active session
+    within the same debounce window as any role-level change — no
+    logout required. UI addition: a new *User Permissions* collapsible
+    section inside the existing Edit User dialog
+    (`UserManagement.jsx`), Super Admin only, hidden for `Super Admin`
+    targets. It shows each module's role default alongside the
+    effective (post-override) value, with a "reset to role default"
+    action per row that DELETEs the override row. Rings around a toggle
+    indicate an active override so **Role Permissions** and **User
+    Overrides** are distinguishable at a glance. The RPCs' Super Admin
+    gate + the target-role refuse-if-`Super Admin` guard together
+    prevent any privilege-escalation path: a regular Admin cannot see
+    the section, cannot call the RPCs, and even a Super Admin cannot
+    grant a peer more than themselves (there is no "more than Super
+    Admin"). Fetch failures on `user_module_overrides` fall back
+    cleanly — role permissions still load and evaluate — so a fresh
+    environment without the migration behaves exactly like before.
+  - **Real-time, no logout.** `PermissionsContext` subscribes (the
+    existing `useRealtimeRefresh` hook) to all three permission
+    tables plus `users`; a Super Admin's change reaches every open
+    session within the hook's debounce window. It also watches the
+    signed-in user's own `users.is_active` and calls `logout()`
+    immediately if it flips to `false` — real-time credential
+    revocation.
+  - **Server-enforced, not client-trusted.** Every privileged mutation
+    (`admin_set_user_role`, `admin_set_user_active`,
+    `admin_reset_user_password`, `admin_create_user`,
+    `admin_set_role_permission`, `admin_set_module_enabled`,
+    `admin_grant_user_permission`) is a `SECURITY DEFINER` RPC that
+    re-verifies the actor's role fresh from `users` — see
+    `frontend/src/api/admin.js`. `UserManagement.jsx`'s role/
+    active-status edits were moved off the old plain `updateUser()`
+    table write (which had no privilege check at all) onto these
+    RPCs. A regular Admin can never act on another Admin or a Super
+    Admin (`fn_can_manage_target`), closing the privilege-escalation
+    gap.
+  - **Server-side password-reset authorization — closed** (previously
+    the "known gap, not yet closed" bullet). The 5 password-reset RPCs
+    (`admin_list_password_reset_requests`,
+    `admin_get_password_reset_request`,
+    `admin_start_password_reset_request`,
+    `admin_complete_password_reset_request`,
+    `admin_reject_password_reset_request`) all gate internally on
+    `_is_active_admin(p_admin_user_id)`, which previously checked only
+    `role = 'Admin' AND is_active` — meaning a Super Admin (role
+    `'Super Admin'`, not `'Admin'`) could not call any of them, and
+    any active Admin could call them regardless of the fine-grained
+    `password_reset` grant in `user_permission_overrides`.
+    `frontend/fix_password_reset_authorization.sql` redefines
+    `_is_active_admin` in place to delegate to `fn_can_reset_passwords`
+    (Super Admin unconditional, plus Admin-with-grant). The function
+    name is preserved deliberately so none of the 5 RPC bodies needs
+    to be rewritten — their `IF NOT _is_active_admin(...)` calls
+    inherit the new semantics on the next call. The header comment on
+    the redefine explicitly notes the widened intent
+    ("was 'is this an active Admin', is now 'is this user authorized
+    to process password reset requests'") so a future reader who
+    greps the name understands why. The same migration also
+    strengthens `admin_grant_user_permission` to refuse Super Admin
+    targets and actor-on-self — matching the immunity discipline used
+    by `admin_set_user_module_override` and
+    `admin_set_role_permission`, so the "Super Admin's password_reset
+    cannot be revoked, even by another Super Admin" property is now
+    enforced at the write layer, not just at evaluation time. Real-
+    time revocation was already in place via
+    `PermissionsContext.REALTIME_TABLES`; combined with this
+    server-side fix, a Super Admin revoking a grant now takes effect
+    on the affected Admin's screen (sidebar, route, page render) **and**
+    on their subsequent RPC calls within the realtime debounce window.
+    No client change was needed.
+  - **Live role refresh.** `PermissionsContext`'s existing watch on
+    the signed-in user's own `users` row now also compares `role` (not
+    just `is_active`) — if a Super Admin changes this user's own role
+    while they're signed in, `AuthContext.updateProfileRole()` patches
+    `profile.role` in place and `DashboardRouter` immediately renders
+    the correct dashboard for the new role, with no logout/re-login
+    step. Satisfies "the dashboard must update immediately after
+    re-authentication or permission refresh" without adding a second
+    place that mutates the session profile.
+  - **Maintenance mode.** A single additional row in the existing
+    `modules` table (`system_maintenance`, off by default, distinct
+    from the pre-existing `maintenance` equipment-maintenance business
+    module so the two can never be confused) toggled from the Super
+    Admin Dashboard. `ProtectedRoute` blocks every route for every
+    non-Super-Admin while it's on, via a full-page "System under
+    maintenance" screen. No new table or RPC — reuses
+    `admin_set_module_enabled` and the same realtime subscription
+    already in place.
+  - **Bug found and fixed the same day**: before the `system_maintenance`
+    row had actually been inserted in a given database, every non-
+    Super-Admin was incorrectly locked out with the maintenance screen,
+    even though nobody had turned it on. Root cause: the check reused
+    `isModuleEnabled()`, whose `?? true` fallback is the *correct* safe
+    default for ordinary nav modules (missing row → don't hide it) but
+    is exactly backwards for this one flag (missing row → must read as
+    "off", not "on"). Fixed by adding a dedicated
+    `isMaintenanceModeOn` in `PermissionsContext` — a strict
+    `moduleMap?.get('system_maintenance') === true`, which is only ever
+    true for a real, present, explicit `true` value. `ProtectedRoute`
+    now checks that instead. Do not route this check back through
+    `isModuleEnabled()` or anything else with an enabled-by-default
+    fallback.
 
 ## Notifications
 
@@ -453,6 +636,69 @@ password manually via the existing user-management RPC.
   - Non-Admin users see an *Admin access required* placeholder; the page
     also gates every action through server-enforced RBAC.
 
+- **New page** (`frontend/src/pages/admin/PermissionsManagement.jsx`,
+  route `/permissions`, sidebar entry *"Roles & Permissions"*,
+  Super-Admin-only).
+  - Module enable/disable toggles, a role × module view/edit
+    permission grid, and a per-Admin "Reset Password" grant list — all
+    write through the RPCs in `frontend/src/api/admin.js`, never a
+    direct table write. Realtime-refreshed like every other admin
+    page.
+- **`UserManagement.jsx`** gained: a Super-Admin-only *New User*
+  button/form (`admin_create_user` — internally reuses
+  `set_user_password` rather than reimplementing hashing), role
+  promotion up to Admin/Super Admin (Super-Admin-only; the Role
+  `<select>` is disabled for non-Super-Admins), and the *Active*
+  checkbox now routes through `admin_set_user_active` instead of the
+  old plain table write. The password-reset section is hidden
+  entirely unless `canResetPasswords` is true for the signed-in user.
+- **`AuditLogs.jsx`** gained a second tab, *Admin Actions*, alongside
+  the existing *Session Logs* tab (page heading generalised from
+  "Session Logs" to "Audit Logs" to match) — reads the `audit_logs`
+  table (see below), realtime-refreshed the same way.
+- **`SuperAdminDashboard.jsx`** (dedicated "System Administration"
+  dashboard, wired into `DashboardRouter.jsx` for the `Super Admin`
+  role only — `AdminDashboard.jsx` and the other 9 role dashboards
+  are completely untouched; the two are never shared code). Expanded
+  from the original version to cover every requested overview metric:
+  total/active users, distinct role count, pending password-reset
+  requests (`admin_list_password_reset_requests`), a best-effort
+  pending-approvals count (independent, individually-caught counts
+  across `requirements`/`quotations` pending-ish statuses — never
+  blocks the rest of the page if a count query fails), active
+  sessions, a System Health tile (green "Operational" unless any
+  data source failed to load, in which case "Degraded" — computed
+  client-side from actual fetch outcomes, not a fabricated metric),
+  module enabled/total, and a permission-grants/role-rules summary.
+  Below the stats: the existing users-by-role chart and recent-
+  admin-actions feed, a read-only module-status chip list, and a
+  **Quick access** grid (User Management, Role & Permission
+  Management, Module Management, Password Reset Requests, Audit
+  Logs — all navigate to their existing pages; "Module Management"
+  and "Role & Permission Management" both point at `/permissions`
+  since one page already covers both; "System Settings" shows a
+  "coming soon" toast rather than linking to a page that doesn't
+  exist) plus a **Maintenance Mode** toggle (see Backend/Database and
+  Security sections below) that's a live action, not just a link.
+  Every data source is fetched independently with its own
+  catch-and-degrade, so one failing query never blanks the page.
+- **Super Admin dashboard switcher** (`DashboardRouter.jsx` only —
+  neither dashboard component was touched). A Super Admin is
+  typically still an operational user, so replacing their whole
+  dashboard with the System Administration one meant constant
+  switching back and forth to check sales/dispatch/etc. `/dashboard`
+  now gives the `Super Admin` role a small tab switch — **System
+  Dashboard** | **Operations Dashboard** — right above the dashboard
+  content, instead of picking one or the other. "Operations
+  Dashboard" re-renders the existing `AdminDashboard.jsx` unchanged
+  (the broadest existing operational overview, since Super Admin has
+  no dedicated operational dashboard of its own). Every other role's
+  dashboard selection is completely unaffected. The choice persists
+  for the current browser session (`sessionStorage`, same convention
+  as every other session-scoped flag in the app) so navigating away
+  and back keeps the last-picked view, but a fresh session always
+  lands on the System Dashboard by default, per spec.
+
 ## Backend / Database
 
 - **Migration** — `frontend/password_reset_requests.sql` (apply once in
@@ -483,6 +729,42 @@ password manually via the existing user-management RPC.
     `_is_active_admin(p_user_id)` before doing any work; unauthorised
     calls raise `42501`.
 
+- **Migration** — `frontend/add_super_admin_rbac.sql` (apply once in
+  the Supabase SQL editor; safe to re-run).
+- **New enum value** — `user_role` gains `'Super Admin'` (its own
+  top-level statement; Postgres requires a new enum value to commit
+  before it can be referenced elsewhere in the same script).
+- **Tables** (RLS off, `SELECT`-only grants to `anon`/`authenticated`
+  — same reasoning as every other table in this custom-auth codebase:
+  `auth.uid()` is always NULL, so RLS policies can't be keyed off it;
+  the RPCs below are the only write path):
+  - `role_permissions` — `(role, module_key)` → `can_view`,
+    `can_edit`. Seeded to reproduce the pre-existing `ROLE_NAV`/
+    `PERMISSIONS` matrix exactly, so the migration changes nothing on
+    its own. No rows for `Super Admin` (its access is an unconditional
+    bypass, not a lookup).
+  - `modules` — `module_key` → `label`, `is_enabled`. Seeded with
+    every existing nav key, all enabled, plus one non-nav row,
+    `system_maintenance` (system-wide maintenance-mode lockout),
+    seeded `is_enabled = false` — the one deliberate exception to
+    "everything defaults on."
+  - `user_permission_overrides` — `(user_id, permission_key)` →
+    `granted`. Used today for `permission_key = 'password_reset'`.
+- **RPCs** (all `SECURITY DEFINER`, all re-verify the actor's role
+  fresh from `users` — never trust a client-passed role):
+  `fn_is_super_admin`, `fn_can_reset_passwords`,
+  `fn_can_manage_target` (privilege-ceiling check), `admin_set_user_role`,
+  `admin_set_user_active`, `admin_reset_user_password`
+  (calls the existing `set_user_password` internally),
+  `admin_create_user` (same), `admin_set_role_permission`,
+  `admin_set_module_enabled`, `admin_grant_user_permission`. Every
+  successful call writes an `audit_logs` row via `fn_log_admin_action`
+  (`ROLE_CHANGE`, `USER_ACTIVATED`/`USER_DEACTIVATED`, `USER_CREATED`,
+  `PASSWORD_RESET`, `PERMISSION_CHANGE`, `MODULE_TOGGLE`,
+  `PERMISSION_GRANT`) — the pre-existing `audit_logs` table (previously
+  only written to once, from `api/dispatch.js`) is now the backing
+  store for the Admin Actions tab above.
+
 ## Security Requirements — How They Are Met
 
 - **No account enumeration.** `submit_password_reset_request` returns
@@ -510,6 +792,18 @@ password manually via the existing user-management RPC.
 - **Internal-only delivery.** Notifications are dispatched exclusively
   through `notify_by_roles(...,'Admin',...)` — no email, SMS, OTP, or
   external service is invoked.
+- **Super Admin RBAC follows the same principles**: every write to
+  role/permission/module/user state goes through a `SECURITY DEFINER`
+  RPC that re-checks the actor server-side (never the client-passed
+  role); a privilege ceiling (`fn_can_manage_target`) stops a regular
+  Admin from ever touching another Admin or a Super Admin; every
+  action is written to `audit_logs`; the three new permission tables
+  grant `SELECT` only, so a compromised or malicious client can read
+  its own effective permissions but cannot write any of them directly.
+  One gap remains open and is tracked, not silently left unmentioned:
+  the 5 pre-existing password-reset-request RPCs still gate on a
+  blanket `_is_active_admin` check rather than the new granular
+  permission (see Auth & Access → RBAC above).
 
 ## Not Changed
 

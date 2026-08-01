@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { canAccess } from '../../lib/rolePermissions';
+import { usePermissions } from '../../context/PermissionsContext';
 import { useNotifications } from '../../context/NotificationContext';
 import {
   LayoutDashboard, ClipboardList, FileText, Package,
   Truck, Wrench, DollarSign, Users, MessageSquare,
   ScrollText, LogOut, ShoppingCart, Building2,
-  MoreHorizontal, X, KeyRound,
+  MoreHorizontal, X, KeyRound, ShieldCheck,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -25,16 +25,21 @@ const ALL_NAV = [
   { key: 'users',        label: 'Users',        icon: Users,           path: '/users' },
   { key: 'password-reset-requests', label: 'Pw Resets', icon: KeyRound, path: '/password-reset-requests' },
   { key: 'audit-logs',   label: 'Audit',        icon: ScrollText,      path: '/audit-logs' },
+  { key: 'permissions',  label: 'Permissions',  icon: ShieldCheck,     path: '/permissions' },
 ];
 
 export default function MobileNav() {
   const { role, profile, logout } = useAuth();
+  const { canAccessModule, canResetPasswords } = usePermissions();
   const navigate = useNavigate();
   const [showMore, setShowMore] = useState(false);
   const { notifications } = useNotifications();
   const unreadChatCount = notifications.filter(n => n.type === 'chat' && !n.is_read).length;
 
-  const visible = ALL_NAV.filter(item => canAccess(role, item.key));
+  const visible = ALL_NAV.filter(item =>
+    canAccessModule(item.key) &&
+    (item.key !== 'password-reset-requests' || canResetPasswords)
+  );
   const primary  = visible.slice(0, 4);
   const overflow = visible.slice(4);
 

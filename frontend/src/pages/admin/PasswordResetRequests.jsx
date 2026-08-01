@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import {
@@ -341,7 +342,8 @@ function RequestDetailModal({ request, onClose, onRefresh }) {
 
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function PasswordResetRequests() {
-  const { profile, isAdmin } = useAuth();
+  const { profile } = useAuth();
+  const { canResetPasswords } = usePermissions();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -352,7 +354,7 @@ export default function PasswordResetRequests() {
   const [selectedId,      setSelectedId]      = useState(null);
 
   const load = useCallback(async (silent = false) => {
-    if (!profile?.user_id || !isAdmin) return;
+    if (!profile?.user_id || !canResetPasswords) return;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const data = await adminListPasswordResetRequests(profile.user_id, includeResolved);
@@ -363,7 +365,7 @@ export default function PasswordResetRequests() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [profile?.user_id, isAdmin, includeResolved]);
+  }, [profile?.user_id, canResetPasswords, includeResolved]);
 
   useEffect(() => { load(); }, [load]);
   const realtimeLoad = useCallback(() => load(true), [load]);
@@ -389,14 +391,15 @@ export default function PasswordResetRequests() {
     [rows],
   );
 
-  if (!isAdmin) {
+  if (!canResetPasswords) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <Shield size={44} className="mx-auto text-gray-200 mb-3" />
-          <p className="text-gray-500 font-medium">Admin access required</p>
+          <p className="text-gray-500 font-medium">Permission required</p>
           <p className="text-gray-400 text-sm mt-1">
-            Only administrators can process password reset requests.
+            You have not been granted permission to process password reset requests.
+            Ask your Super Admin to grant it from Roles &amp; Permissions.
           </p>
         </div>
       </div>

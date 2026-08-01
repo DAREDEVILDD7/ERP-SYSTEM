@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { getQuotations, deleteQuotation } from "../../api/quotations";
 import { useAuth } from "../../context/AuthContext";
+import { usePermissions } from "../../context/PermissionsContext";
 import { hasPermission } from "../../lib/rolePermissions";
 import { useAppStore } from "../../store/useAppStore";
 import StatusBadge from "../../components/common/StatusBadge";
@@ -78,8 +79,9 @@ export default function QuotationsPage() {
 
   const { search, status, preparedBy, dateFrom, dateTo } = quotationsFilters;
 
-  const canCreate = hasPermission(role, "quotations_create");
-  const canApprove = hasPermission(role, "quotations_approve");
+  const { canEdit } = usePermissions();
+  const canCreate = hasPermission(role, "quotations_create") && canEdit('quotations');
+  const canApprove = hasPermission(role, "quotations_approve") && canEdit('quotations');
 
   useEffect(() => {
     if (location.state?.requirementId) {

@@ -14,6 +14,7 @@ import {
 import { createLeaseInvoice } from "../../api/finance";
 import { createMaintenanceJob } from "../../api/maintenance";
 import { useAuth } from "../../context/AuthContext";
+import { usePermissions } from "../../context/PermissionsContext";
 import { hasPermission } from "../../lib/rolePermissions";
 import { useAppStore } from "../../store/useAppStore";
 import StatusBadge from "../../components/common/StatusBadge";
@@ -141,7 +142,8 @@ export default function EquipmentPage() {
   });
 
   const { search, status: statusFilter, typeId: typeFilter } = equipmentFilters;
-  const canWrite = hasPermission(role, "equipment_create");
+  const { canEdit } = usePermissions();
+  const canWrite = hasPermission(role, "equipment_create") && canEdit('equipment');
 
   const load = useCallback(
     async (force = false) => {

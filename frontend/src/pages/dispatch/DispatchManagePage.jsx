@@ -7,6 +7,7 @@ import {
   dispatchItems, returnItems,
 } from '../../api/dispatch';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
 import EmptyState from '../../components/common/EmptyState';
@@ -149,7 +150,8 @@ export default function DispatchManagePage() {
   const [returning,      setReturning]      = useState(false);
   const [returnDriver,   setReturnDriver]   = useState({ driver_name:'', vehicle_type:'', vehicle_plate:'' });
 
-  const canWrite = hasPermission(role, 'dispatch_create');
+  const { canEdit } = usePermissions();
+  const canWrite = hasPermission(role, 'dispatch_create') && canEdit('dispatch');
 
   const load = useCallback(async (silent = false) => {
     if (authLoading || !profile || !role) return;

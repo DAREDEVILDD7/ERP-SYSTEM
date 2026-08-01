@@ -2,14 +2,114 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Activity, Users, Clock, LogIn, RefreshCw, Search,
   Shield, Calendar, X,
-  ChevronDown, AlertCircle,
+  ChevronDown, AlertCircle, ScrollText, KeyRound,
 } from 'lucide-react';
-import { format, isToday, parseISO, subDays } from 'date-fns';
+import { format, isToday, parseISO, subDays, formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { getSessionLogs } from '../../api/sessionLogs';
+import { getAdminAuditLog } from '../../api/admin';
 import { useRealtimeRefresh } from '../../hooks/useRealtimeRefresh';
 import { SkeletonTable, SkeletonStatCards } from '../../components/common/Skeleton';
+
+const ACTION_LABELS = {
+  ROLE_CHANGE:        'Role changed',
+  USER_ACTIVATED:     'User activated',
+  USER_DEACTIVATED:   'User deactivated',
+  USER_CREATED:       'User created',
+  PASSWORD_RESET:     'Password reset',
+  PERMISSION_CHANGE:  'Permission updated',
+  MODULE_TOGGLE:      'Module toggled',
+  PERMISSION_GRANT:   'Permission grant changed',
+};
+
+// ── Admin Actions tab — lightweight, additive to the existing Session Logs
+// page below rather than a page of its own (audit_logs is a separate table
+// from session_logs: every Super-Admin RPC in add_super_admin_rbac.sql
+// writes here via fn_log_admin_action).
+function AdminActionsTab() {
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search,  setSearch]  = useState('');
+
+  const load = useCallback(async () => {
+    try { setRows(await getAdminAuditLog(500)); }
+    catch (err) { toast.error(err.message || 'Failed to load admin actions'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useRealtimeRefresh(['audit_logs'], load);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return rows;
+    return rows.filter(r =>
+      (ACTION_LABELS[r.action] ?? r.action).toLowerCase().includes(q)
+      || r.table_name?.toLowerCase().includes(q)
+      || r.record_id?.toLowerCase().includes(q)
+      || r.user_id?.toLowerCase().includes(q)
+    );
+  }, [rows, search]);
+
+  return (
+    <div className="space-y-4">
+      <div className="relative max-w-sm">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"/>
+        <input
+          className="input pl-9 text-sm w-full"
+          placeholder="Search action, table, user…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      {loading ? (
+        <SkeletonTable rows={8} colWidths={[140, 100, 110, 140, 110]} />
+      ) : filtered.length === 0 ? (
+        <div className="card p-12 text-center">
+          <ScrollText size={36} className="mx-auto text-gray-200 mb-3" />
+          <p className="text-gray-500 font-medium">No admin actions recorded</p>
+          <p className="text-gray-400 text-sm mt-1">Role, permission, module, and user-management changes will appear here.</p>
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/60">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Action</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Table</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Record</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">By</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">When</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map(r => (
+                  <tr key={r.log_id} className="hover:bg-gray-50/60">
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5 text-gray-800 font-medium">
+                        <KeyRound size={13} className="text-gray-300" />
+                        {ACTION_LABELS[r.action] ?? r.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{r.table_name}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{r.record_id}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{r.user_id ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-400" title={format(new Date(r.created_at), 'dd MMM yyyy, HH:mm')}>
+                      {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +183,7 @@ const STATUS_CFG = {
 
 export default function AuditLogs() {
   const { isAdmin } = useAuth();
+  const [tab, setTab] = useState('sessions'); // 'sessions' | 'actions'
 
   const [logs,       setLogs]       = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -195,22 +296,45 @@ export default function AuditLogs() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              <Shield size={20} className="text-indigo-500"/> Session Logs
+              <Shield size={20} className="text-indigo-500"/> Audit Logs
             </h1>
             <p className="text-sm text-gray-400 mt-0.5">
-              {logs.length} records · {filtered.length} shown
+              {tab === 'sessions' ? `${logs.length} records · ${filtered.length} shown` : 'Role, permission, module, and user-management changes'}
             </p>
           </div>
-          <button
-            onClick={() => load(true)}
-            disabled={refreshing || loading}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
-            Refresh
-          </button>
+          {tab === 'sessions' && (
+            <button
+              onClick={() => load(true)}
+              disabled={refreshing || loading}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''}/>
+              Refresh
+            </button>
+          )}
         </div>
 
+        {/* Tabs */}
+        <div className="flex gap-1 border-b border-gray-100">
+          {[
+            { key: 'sessions', label: 'Session Logs', icon: LogIn },
+            { key: 'actions',  label: 'Admin Actions', icon: ScrollText },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === t.key ? 'border-jtc text-jtc' : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <t.icon size={14} /> {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'actions' && <AdminActionsTab />}
+
+        {tab === 'sessions' && <>
         {/* Stat Cards */}
         {loading && <SkeletonStatCards count={4} />}
         <div className={loading ? 'hidden' : 'grid grid-cols-2 lg:grid-cols-4 gap-3'}>
@@ -477,6 +601,7 @@ export default function AuditLogs() {
             </p>
           </>
         )}
+        </>}
       </div>
     </>
   );

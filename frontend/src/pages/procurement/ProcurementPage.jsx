@@ -9,6 +9,7 @@ import {
 } from '../../api/procurement';
 import { getEquipmentTypes, createEquipmentType } from '../../api/equipment';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
 import { SkeletonTable } from '../../components/common/Skeleton';
@@ -680,10 +681,11 @@ export default function ProcurementPage() {
   const [receiveNewTypeItemId,       setReceiveNewTypeItemId]       = useState(null);
   const [receiveNewTypeSuggestedName, setReceiveNewTypeSuggestedName] = useState('');
 
-  const canWrite   = hasPermission(role, 'procurement_create');
-  const canApprove = hasPermission(role, 'procurement_approve');
-  const canPO      = hasPermission(role, 'po_create');
-  const canVendor  = hasPermission(role, 'vendor_manage');
+  const { canEdit } = usePermissions();
+  const canWrite   = hasPermission(role, 'procurement_create') && canEdit('procurement');
+  const canApprove = hasPermission(role, 'procurement_approve') && canEdit('procurement');
+  const canPO      = hasPermission(role, 'po_create') && canEdit('procurement');
+  const canVendor  = hasPermission(role, 'vendor_manage') && canEdit('procurement');
 
   // ── Procurement form ──────────────────────────────────────────────────────
   const [procForm, setProcForm] = useState({

@@ -1,4 +1,5 @@
 export const ROLES = {
+  SUPER_ADMIN: 'Super Admin',
   ADMIN:       'Admin',
   SALES:       'Sales Executive',
   OPERATIONS:  'Operations Manager',
@@ -11,6 +12,17 @@ export const ROLES = {
 };
 
 export const ROLE_NAV = {
+  // Super Admin's access is an unconditional bypass (see hasPermission/
+  // canAccess below), mirroring the DB side (fn_is_super_admin) where it
+  // has no role_permissions rows either - this list exists only so
+  // anything that iterates ROLE_NAV directly (rather than calling
+  // canAccess()) still sees the full module set.
+  [ROLES.SUPER_ADMIN]: [
+    'dashboard','requirements','quotations','equipment',
+    'dispatch','maintenance','finance','procurement',
+    'customers','chat','users','audit-logs',
+    'password-reset-requests','permissions',
+  ],
   [ROLES.ADMIN]: [
     'dashboard','requirements','quotations','equipment',
     'dispatch','maintenance','finance','procurement',
@@ -88,10 +100,12 @@ export const PERMISSIONS = {
 };
 
 export function hasPermission(userRole, permission) {
+  if (userRole === ROLES.SUPER_ADMIN) return true; // unconditional, matches fn_is_super_admin on the DB side
   return PERMISSIONS[permission]?.includes(userRole) ?? false;
 }
 
 export function canAccess(userRole, navItem) {
+  if (userRole === ROLES.SUPER_ADMIN) return true; // unconditional, matches fn_is_super_admin on the DB side
   return ROLE_NAV[userRole]?.includes(navItem) ?? false;
 }
 

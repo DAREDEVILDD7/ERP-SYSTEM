@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { getRequirements } from '../../api/requirements';
 import { useAuth } from '../../context/AuthContext';
+import { usePermissions } from '../../context/PermissionsContext';
 import { hasPermission } from '../../lib/rolePermissions';
 import { useAppStore } from '../../store/useAppStore';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -53,8 +54,9 @@ export default function RequirementsPage() {
 
   const { search, status, priority, dateFrom, dateTo, customer, createdBy } = requirementsFilters;
 
-  const canCreate = hasPermission(role, 'requirements_create');
-  const canReview = hasPermission(role, 'requirements_review');
+  const { canEdit } = usePermissions();
+  const canCreate = hasPermission(role, 'requirements_create') && canEdit('requirements');
+  const canReview = hasPermission(role, 'requirements_review') && canEdit('requirements');
 
   const load = useCallback(async (force = false) => {
     // Don't fetch until auth session is restored — prevents stale empty-cache bug
