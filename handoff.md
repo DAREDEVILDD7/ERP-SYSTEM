@@ -554,6 +554,40 @@ password manually via the existing user-management RPC.
     build time, so it follows whichever project the deployment targets
     instead of hard-coding a host, and it opens the TLS connection while
     the bundle is still downloading.
+  - **Deploy failure after the first push of this pass, and the fix.**
+    The `vercel.json` added above originally carried `"//"` keys holding
+    the rationale for each rule. Vercel validates `vercel.json` against
+    `openapi.vercel.sh/vercel.json`, which sets `additionalProperties:
+    false` at the top level and inside every `headers[]` entry (only
+    `source` / `headers` / `has` / `missing` are permitted there), so the
+    config was rejected **during validation, before the build starts** —
+    which is why it presented as "the push just didn't deploy" with no
+    build log to inspect. The four offending keys are gone; the rationale
+    now lives in CLAUDE.md and here. Validated against the published
+    schema, which also confirms `$schema` is the one metadata key
+    allowed. `npm ci` from a clean clone and `CI=true npm run build` were
+    both re-run green. **Never put comments in `vercel.json`.**
+  - **Chunk-load recovery** (`lib/lazyRoute.js`, new). Code splitting
+    added a failure that did not exist when everything was one bundle: a
+    redeploy renames the hashed chunks, so a user holding the old page who
+    navigates to a not-yet-visited route requests a chunk that now 404s,
+    and the ErrorBoundary turns that into "Something went wrong" for the
+    whole app. `lazyRoute` wraps `React.lazy` and retries the import once
+    (transient network), then reloads the page once so the tab picks up
+    the current build, then re-throws. The once-only guard is
+    `sessionStorage["jtc_chunk_reload"]`, cleared by the next chunk that
+    loads successfully so a later unrelated failure still gets its own
+    retry; storage access is wrapped, and if `sessionStorage` is
+    unavailable the code declines to reload at all rather than risk a
+    loop. All 15 routes use it; bare `lazy()` should not be used for
+    anything routed.
+  - **Missing-env-var diagnosis** (`lib/supabaseClient.js`). That module
+    is imported before React mounts, so `createClient(undefined, …)`
+    throwing meant a blank page with no ErrorBoundary and only
+    "supabaseUrl is required." in the console — which omits the thing a
+    deployer actually needs: CRA inlines `REACT_APP_*` at **build** time,
+    so adding the variables in Vercel does nothing until a new deploy.
+    The guard now names the missing variable and says that explicitly.
   - **Deliberately not touched, with measurements.** `framer-motion`
     (~135 kB uncompressed) stays in the main bundle: both consumers
     (`JTCLogoAnimation`, `SidebarLogoHover`) are on the boot path, and the

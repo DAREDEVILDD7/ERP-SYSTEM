@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Component, lazy } from "react";
+import { Component } from "react";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "./context/AuthContext";
 import { PermissionsProvider } from "./context/PermissionsContext";
@@ -9,6 +9,7 @@ import Layout from "./components/common/Layout";
 import Login from "./pages/auth/Login";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
+import lazyRoute from "./lib/lazyRoute";
 
 /* Every routed page is code-split. Before this, all 15 pages plus everything
    they pull in (recharts + d3 for the dashboards, jspdf for the PDF exports,
@@ -26,22 +27,25 @@ import { queryClient } from "./lib/queryClient";
    the shell instantly so the Suspense fallback appears *inside* the page
    area rather than replacing the sidebar and navbar.
 
-   The Suspense boundary lives in Layout, around <Outlet />. */
-const DashboardRouter = lazy(() => import("./pages/DashboardRouter"));
-const RequirementsPage = lazy(() => import("./pages/sales/RequirementsPage"));
-const QuotationsPage = lazy(() => import("./pages/sales/QuotationsPage"));
-const CustomersPage = lazy(() => import("./pages/sales/CustomersPage"));
-const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"));
-const DispatchManagePage = lazy(() => import("./pages/dispatch/DispatchManagePage"));
-const MaintenanceJobsPage = lazy(() => import("./pages/maintenance/MaintenanceJobsPage"));
-const InvoicesPage = lazy(() => import("./pages/finance/InvoicesPage"));
-const ChatPage = lazy(() => import("./pages/chat/ChatPage"));
-const UserManagement = lazy(() => import("./pages/admin/UserManagement"));
-const AuditLogs = lazy(() => import("./pages/admin/AuditLogs"));
-const PasswordResetRequests = lazy(() => import("./pages/admin/PasswordResetRequests"));
-const PermissionsManagement = lazy(() => import("./pages/admin/PermissionsManagement"));
-const ProcurementPage = lazy(() => import("./pages/procurement/ProcurementPage"));
-const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
+   The Suspense boundary lives in Layout, around <Outlet />.
+
+   `lazyRoute` is React.lazy plus recovery from a chunk 404 after a redeploy —
+   see lib/lazyRoute.js. Use it, not bare `lazy()`, for anything routed. */
+const DashboardRouter = lazyRoute(() => import("./pages/DashboardRouter"));
+const RequirementsPage = lazyRoute(() => import("./pages/sales/RequirementsPage"));
+const QuotationsPage = lazyRoute(() => import("./pages/sales/QuotationsPage"));
+const CustomersPage = lazyRoute(() => import("./pages/sales/CustomersPage"));
+const EquipmentPage = lazyRoute(() => import("./pages/operations/EquipmentPage"));
+const DispatchManagePage = lazyRoute(() => import("./pages/dispatch/DispatchManagePage"));
+const MaintenanceJobsPage = lazyRoute(() => import("./pages/maintenance/MaintenanceJobsPage"));
+const InvoicesPage = lazyRoute(() => import("./pages/finance/InvoicesPage"));
+const ChatPage = lazyRoute(() => import("./pages/chat/ChatPage"));
+const UserManagement = lazyRoute(() => import("./pages/admin/UserManagement"));
+const AuditLogs = lazyRoute(() => import("./pages/admin/AuditLogs"));
+const PasswordResetRequests = lazyRoute(() => import("./pages/admin/PasswordResetRequests"));
+const PermissionsManagement = lazyRoute(() => import("./pages/admin/PermissionsManagement"));
+const ProcurementPage = lazyRoute(() => import("./pages/procurement/ProcurementPage"));
+const AnalyticsPage = lazyRoute(() => import("./pages/analytics/AnalyticsPage"));
 
 class ErrorBoundary extends Component {
   constructor(props) {

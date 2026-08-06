@@ -1,26 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "create-react-app",
-
-  "//": [
-    "Lives in frontend/ because that is the app root (package.json is here);",
-    "set Vercel's Root Directory to `frontend` and it will be picked up.",
-    "Build/install/output come from the create-react-app preset - do not",
-    "override them here or the preset's defaults stop applying."
-  ],
-
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
-
   "headers": [
     {
-      "//": "Webpack content-hashes everything under /static, so a changed file is a changed URL - it can never be served stale.",
       "source": "/static/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "//": "public/ assets keep a STABLE filename (the logo pieces and the sprite sheet are referenced by literal path), so `immutable` here would pin a regenerated asset for a year. One day fresh, one week of stale-while-revalidate instead: repeat visits are free and a rebuild still propagates.",
       "source": "/(logo|analytics)/(.*)",
       "headers": [
         {
@@ -30,7 +19,6 @@
       ]
     },
     {
-      "//": "The SPA shell must always be revalidated or a deploy never reaches returning users - it is what points at the hashed bundles.",
       "source": "/index.html",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
