@@ -243,25 +243,3 @@ export function SkeletonPreviewCard({ className = '' }) {
     </div>
   );
 }
-
-/**
- * SkeletonCards — a vertical stack of mobile-style card skeletons.
- * Useful when a page only has card layout (no table).
- */
-export function SkeletonCards({ count = 5, className = '' }) {
-  return (
-    <div className={clsx('card overflow-hidden divide-y divide-gray-100', className)}>
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="p-4 flex gap-3">
-          <Sk className="rounded-xl shrink-0" style={{ width: 48, height: 48 }} />
-          <div className="flex-1 space-y-2">
-            <Sk style={{ height: 14, width: 130 + (i % 3) * 20 }} />
-            <Sk style={{ height: 11, width: 180 + (i % 2) * 20 }} />
-            <Sk style={{ height: 11, width: 140 }} />
-          </div>
-          <Sk className="rounded-full shrink-0" style={{ width: 60, height: 20 }} />
-        </div>
-      ))}
-    </div>
-  );
-}

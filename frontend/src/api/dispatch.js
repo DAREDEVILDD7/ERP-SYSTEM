@@ -103,11 +103,6 @@ export async function createDispatchesFromQuotation(quotation, assignedBy) {
   return { created, pendingProcurement, errors };
 }
 
-// Legacy single-dispatch helper — kept for backwards compatibility
-export async function createDispatchFromQuotation(quotation, assignedBy) {
-  const result = await createDispatchesFromQuotation(quotation, assignedBy);
-  return result.created[0]?.dispatch ?? null;
-}
 
 export async function getDispatchesFast(filters = {}) {
   let query = supabase

@@ -1,6 +1,8 @@
+import { Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
 import MobileNav from './MobileNav';
+import LoadingSpinner from './LoadingSpinner';
 import { Outlet, useLocation } from 'react-router-dom';
 
 const PAGE_TITLES = {
@@ -33,7 +35,14 @@ export default function Layout() {
         <Navbar title={title} />
         {/* pb-16 on mobile to avoid content hiding behind bottom nav */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
-          <Outlet />
+          {/* The one Suspense boundary for every code-split page (see App.js).
+              It sits INSIDE <main>, below the sidebar and navbar, so a chunk
+              fetch shows an in-content spinner instead of tearing down the
+              shell — the non-fullscreen variant is the same affordance the
+              app already uses for in-page loads. */}
+          <Suspense fallback={<LoadingSpinner fullscreen={false} />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

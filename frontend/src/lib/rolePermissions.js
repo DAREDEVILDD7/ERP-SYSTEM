@@ -21,13 +21,13 @@ export const ROLE_NAV = {
     'dashboard','requirements','quotations','equipment',
     'dispatch','maintenance','finance','procurement',
     'customers','chat','users','audit-logs',
-    'password-reset-requests','permissions',
+    'password-reset-requests','permissions','analytics',
   ],
   [ROLES.ADMIN]: [
     'dashboard','requirements','quotations','equipment',
     'dispatch','maintenance','finance','procurement',
     'customers','chat','users','audit-logs',
-    'password-reset-requests',
+    'password-reset-requests','analytics',
   ],
   [ROLES.SALES]: [
     'dashboard','requirements','quotations','customers',
@@ -35,7 +35,7 @@ export const ROLE_NAV = {
   ],
   [ROLES.OPERATIONS]: [
     'dashboard','requirements','quotations','equipment',
-    'dispatch','maintenance','chat',
+    'dispatch','maintenance','chat','analytics',
   ],
   [ROLES.WAREHOUSE]: [
     'dashboard','equipment','maintenance','chat',
@@ -45,7 +45,7 @@ export const ROLE_NAV = {
   ],
   [ROLES.FINANCE]: [
     'dashboard','quotations','finance','procurement',
-    'customers','chat',
+    'customers','chat','analytics',
   ],
   [ROLES.MAINTENANCE]: [
     'dashboard','maintenance','equipment','chat',
@@ -56,7 +56,7 @@ export const ROLE_NAV = {
   ],
   [ROLES.IT_HEAD]: [
     'dashboard','requirements','users','audit-logs',
-    'equipment','maintenance','procurement','chat',
+    'equipment','maintenance','procurement','chat','analytics',
   ],
 };
 

@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   useCallback,
 } from "react";
@@ -191,23 +192,29 @@ export function AuthProvider({ children }) {
   }, [profile]);
 
   // ── context value ─────────────────────────────────────────────────────────
+  // Memoised, same rationale as PermissionsContext: this provider sits above
+  // the entire tree, so an inline object literal would hand every useAuth()
+  // consumer a new value on any render of this component. The derived fields
+  // are primitives and the actions are useCallback-wrapped, so the dependency
+  // comparison is exact.
+  const value = useMemo(() => ({
+    user:               profile,
+    profile,
+    role:               profile?.role ?? null,
+    loading,
+    error,
+    login,
+    logout,
+    changePassword,
+    adminResetPassword,
+    updateProfileRole,
+    isAdmin:            profile?.role === "Admin" || profile?.role === "Super Admin",
+    isSuperAdmin:       profile?.role === "Super Admin",
+  }), [profile, loading, error, login, logout, changePassword,
+       adminResetPassword, updateProfileRole]);
+
   return (
-    <AuthContext.Provider
-      value={{
-        user:               profile,
-        profile,
-        role:               profile?.role ?? null,
-        loading,
-        error,
-        login,
-        logout,
-        changePassword,
-        adminResetPassword,
-        updateProfileRole,
-        isAdmin:            profile?.role === "Admin" || profile?.role === "Super Admin",
-        isSuperAdmin:       profile?.role === "Super Admin",
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

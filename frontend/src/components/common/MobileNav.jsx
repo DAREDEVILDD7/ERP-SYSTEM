@@ -7,7 +7,7 @@ import {
   LayoutDashboard, ClipboardList, FileText, Package,
   Truck, Wrench, DollarSign, Users, MessageSquare,
   ScrollText, LogOut, ShoppingCart, Building2,
-  MoreHorizontal, X, KeyRound, ShieldCheck,
+  MoreHorizontal, X, KeyRound, ShieldCheck, BarChart3,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -26,6 +26,7 @@ const ALL_NAV = [
   { key: 'password-reset-requests', label: 'Pw Resets', icon: KeyRound, path: '/password-reset-requests' },
   { key: 'audit-logs',   label: 'Audit',        icon: ScrollText,      path: '/audit-logs' },
   { key: 'permissions',  label: 'Permissions',  icon: ShieldCheck,     path: '/permissions' },
+  { key: 'analytics',    label: 'Analytics',    icon: BarChart3,       path: '/analytics' },
 ];
 
 export default function MobileNav() {

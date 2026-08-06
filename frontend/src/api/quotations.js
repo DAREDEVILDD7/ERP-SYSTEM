@@ -2,14 +2,6 @@ import { supabase } from "../lib/supabaseClient";
 
 let _creating = false;
 
-// eslint-disable-next-line no-unused-vars
-function daysFromDates(start, end) {
-  if (!start || !end) return null;
-  const d1 = new Date(start);
-  const d2 = new Date(end);
-  if (isNaN(d1.getTime()) || isNaN(d2.getTime()) || d2 < d1) return null;
-  return Math.ceil((d2 - d1) / 86_400_000) + 1;
-}
 
 export async function getQuotations(filters = {}) {
   let query = supabase
@@ -353,29 +345,6 @@ export async function getAvailableEquipment() {
   return data ?? [];
 }
 
-export async function getEquipmentStockByType() {
-  const { data, error } = await supabase
-    .from("equipment_units")
-    .select("type_id, status, equipment_id, equipment_types(name, type_id)");
-  if (error) throw error;
-
-  const map = {};
-  (data ?? []).forEach((u) => {
-    const key = u.type_id;
-    if (!map[key])
-      map[key] = {
-        type_id: key,
-        name: u.equipment_types?.name,
-        available: 0,
-        reserved: 0,
-        total: 0,
-      };
-    map[key].total++;
-    if (u.status === "Available") map[key].available++;
-    if (u.status === "Reserved") map[key].reserved++;
-  });
-  return map;
-}
 
 export async function postQuoteCreatedChatMessage(quotationId, requirementId, userId, department) {
   if (!requirementId) return;

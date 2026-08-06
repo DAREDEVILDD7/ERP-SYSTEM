@@ -19,6 +19,7 @@ import {
   Building2,
   KeyRound,
   ShieldCheck,
+  BarChart3,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
@@ -80,6 +81,7 @@ const NAV_ITEMS = [
     icon: ShieldCheck,
     path: "/permissions",
   },
+  { key: "analytics", label: "Analytics", icon: BarChart3, path: "/analytics" },
 ];
 
 export default function Sidebar() {

@@ -20,7 +20,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { format } from "date-fns";
-import { downloadQuotationPDF } from "../../lib/pdfGenerator";
+import { downloadQuotationPDF } from "../../lib/pdfGeneratorAsync";
 import toast from "react-hot-toast";
 import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";

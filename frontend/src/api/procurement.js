@@ -28,23 +28,6 @@ export async function getProcurements(filters = {}) {
   return data ?? [];
 }
 
-export async function getProcurement(id) {
-  const { data, error } = await supabase
-    .from("procurements")
-    .select(
-      `
-      *,
-      vendors ( * ),
-      users!procurements_requested_by_fkey ( name, role ),
-      procurement_items ( *, equipment_types ( name, category ) ),
-      purchase_orders ( * )
-    `,
-    )
-    .eq("procurement_id", id)
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 export async function createProcurement(payload, items) {
   const { data, error } = await supabase
@@ -99,16 +82,6 @@ export async function createVendor(payload) {
   return data;
 }
 
-export async function updateVendor(id, payload) {
-  const { data, error } = await supabase
-    .from("vendors")
-    .update(payload)
-    .eq("vendor_id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 export async function getPurchaseOrders(filters = {}) {
   let query = supabase

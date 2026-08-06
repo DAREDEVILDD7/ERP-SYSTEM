@@ -1,3 +1,7 @@
+/* Do NOT import this module statically from a page or component — jspdf +
+   jspdf-autotable are ~117 kB gzipped and a static import welds them onto that
+   page's chunk. Go through `pdfGeneratorAsync.js`, which defers the import to
+   the moment an export is actually clicked. */
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';

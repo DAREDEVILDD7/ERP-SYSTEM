@@ -1,0 +1,479 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * ClaudeTypingLoader — in-panel loading animation for the Analytics module.
+ *
+ * Scope: this file is imported ONLY by ClaudeTypingLoader.jsx and every
+ * selector is `jtca-` prefixed (JTC Analytics), so it cannot reach the
+ * truck loading animation, the sidebar logo replay, or any other surface.
+ * Keyframes live here rather than in a component <style> tag so N mounted
+ * loaders still define them exactly once.
+ *
+ * ── Five nested motion layers, deliberately not merged ─────────────────
+ *   .jtca-figure  — slow breathing loop             (3.6s)
+ *   .jtca-keys    — per-keystroke dip + laptop shake (2.6s)
+ *   .jtca-lift    — hand rise / tap / settle row    (7.8s, stepped)
+ *   .jtca-blink   — eyes open/shut row selection    (12.7s, stepped)
+ *   .jtca-sprite  — pose column selection           (2.6s, stepped)
+ * They are separate nested elements on purpose: five animations on one
+ * element would fight over the single `transform` property (last one wins).
+ * Nesting composes the transforms instead. The sheet is a 5-column x 8-row
+ * grid: the pose is the COLUMN (`.jtca-sprite`) and the row encodes both the
+ * hand lift and the blink (row = blink * 4 + lift), selected by two stacked
+ * row layers. Three independent axes over ONE image — which is the whole
+ * reason the hands, the blink and the pose each run on their own timer
+ * instead of being welded to a single cycle.
+ *
+ * Every one of the five animates ONLY `transform`, so the whole loader
+ * stays on the compositor and never triggers layout or paint per frame —
+ * including the frame stepping, which is a stepped translate of the sheet
+ * behind a fixed window rather than a `background-position` repaint.
+ *
+ * `.jtca-keys` and `.jtca-sprite` share the same 2.6s period and both start
+ * at mount, so the shake is phase-locked to the keystrokes for as long as
+ * the loader lives — it cannot drift. `.jtca-lift` runs at 7.8s, exactly 3 x
+ * 2.6s, so every tap lands on a strike and the hands can never drift off the
+ * beat either. `.jtca-figure` (3.6s) and `.jtca-blink` (12.7s) are instead
+ * deliberately non-harmonic: 26, 36, 78 and 127 tenths of a second share no
+ * common factor, so the composite pose does not repeat for ~99 minutes.
+ * Nothing here ever reads as a short mechanical cycle.
+ *
+ * translateY is expressed in % — relative to the element's own height — so
+ * the motion scales with the rendered artwork size and needs no per-
+ * breakpoint retuning.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.jtca-root {
+  /* Absolute so appearing/disappearing can never shift the card's layout.
+     Parent must be positioned (SectionCard's body wrapper is `relative`). */
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 12px;
+  /* Transparent while loading, so the loader reads as part of the glass
+     card rather than as a pale box sitting on top of it. The exit wash is
+     applied inline only for the fade-out frame — see the component. */
+  background: transparent;
+  pointer-events: none;
+}
+
+/* ── Artwork ──────────────────────────────────────────────────────────── */
+
+.jtca-figure {
+  /* Scales with the panel and is hard-capped so it can never overflow a
+     short card. The sheet's composition is landscape (laptop beside the
+     mascot) where the old single-pose asset was square, so the clamp is
+     widened to keep the mascot at the same apparent size as before; the
+     rendered box is SHORTER than the old one, so vertical space in the card
+     is unchanged-to-freer and nothing can overflow. */
+  width: clamp(92px, 40%, 150px);
+  max-width: 100%;
+  will-change: transform;
+  animation: jtca-breathe 3.6s ease-in-out infinite;
+}
+
+.jtca-keys {
+  will-change: transform;
+  animation: jtca-keys 2.6s ease-in-out infinite;
+}
+
+/* Fixed window onto the sprite sheet. `padding-bottom` (rather than
+   `aspect-ratio`) locks the cell's 289x153 ratio with no reliance on newer
+   layout features, and `overflow: hidden` is what makes only one cell
+   visible. Nothing inside this element is transformed except the sheet's
+   own frame stepping, so the artwork can never be clipped by the breathing
+   or keystroke layers — those move this whole window, not its contents. */
+.jtca-stage {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 52.9412%; /* 153 / 289 */
+  overflow: hidden;
+}
+
+/* Hand-lift row selector: four cell-rows tall (lift 0/7/13/20px), so -25% of
+   its OWN height is always exactly one row. Separate element so the hand
+   rhythm gets its own transform and its own, much longer, period. */
+.jtca-lift {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 400%;
+  will-change: transform;
+  /* Static fallback = row 2, hands clearly raised off the keys. Only ever seen
+     under reduced motion, where a mid-stroke pose reads better than hands
+     flat on the keyboard. Must stay a whole multiple of -25%. */
+  transform: translate3d(0, -50%, 0);
+  animation: jtca-lift 7.8s steps(1, end) infinite;
+}
+
+/* Blink row selector, nested inside the lift layer: eight rows tall, so -50%
+   of its OWN height skips the four lift rows in one go and lands on the
+   eyes-shut half of the sheet. The two selectors compose additively —
+   row = blink * 4 + lift — which is exactly the sheet's layout, and is what
+   lets the blink and the hands run on completely independent timers. */
+.jtca-blink {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 200%;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  animation: jtca-blink 12.7s steps(1, end) infinite;
+}
+
+/* The 5x8 sheet. Width is 500% of the window and height 100% of the blink
+   layer (i.e. all eight rows), so translating by a multiple of 20% of the
+   sheet's OWN width lands exactly on a cell boundary at any rendered size —
+   no per-breakpoint math, and any sub-pixel rounding at the window edge can
+   only ever expose the cells' transparent gutter, never a neighbouring
+   frame. */
+.jtca-sprite {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 500%;
+  height: 100%;
+  /* LOAD-BEARING. Tailwind's preflight (`@tailwind base` in index.css) ships
+     `img, video { max-width: 100%; height: auto }`. `max-width` is a separate
+     property from `width`, so without this reset preflight caps the used width
+     at ONE cell and squeezes the entire 5-cell sheet into the window — which
+     renders as ~5 Claudes side by side, squashed 5:1, with the stepped
+     translate sliding them about. `height` is already won back by this rule's
+     class specificity, but both are pinned here so neither can regress. */
+  max-width: none;
+  min-width: 0;
+  /* Static fallback = cell 2 (pose 3), a resting pose with hands on the keys
+     and no impact marks. Only ever seen when the animation is off (reduced
+     motion), and it must be a whole multiple of -20% so the window can never
+     rest on a half-cell. */
+  transform: translate3d(-40%, 0, 0);
+  backface-visibility: hidden;
+  user-select: none;
+  will-change: transform;
+  /* steps(1, end) makes every keyframe HOLD until the next one, which is
+     what turns the stop list below into per-frame durations — the frames
+     are deliberately unevenly spaced so the typing never reads as a
+     metronome. */
+  animation: jtca-frames 2.6s steps(1, end) infinite;
+}
+
+/* Hand rhythm. Rows 0..3 are the hands resting on the keys, then lifted 7,
+ * 13 and 20 sheet px; -25% is exactly one row.
+ *
+ * The period is 7.8s = 3 x the 2.6s pose cycle, so every tap below lands on
+ * one of that cycle's seven strike stops — the hands, the keystroke dip and
+ * the drawn impact marks all hit together, permanently, with no drift.
+ *
+ * Shape of one cycle:
+ *   0 - 4%    the hands rise off the keys, 0 -> 7 -> 13 -> 20px. The stops
+ *             are spaced 78 / 94 / 140ms, i.e. decelerating, which is what
+ *             gives a stepped sprite an ease-out feel.
+ *   4 - 89%   17 taps, ~2.2 per second. Each presses to row 0 (contact) and
+ *             releases to row 2 or row 3, so the hand travels 13-20 sheet px
+ *             per keystroke and is clearly airborne between them. Release
+ *             heights alternate irregularly so no two taps look alike.
+ *   89 - 100% the hands settle back onto the keys, landing on the last two
+ *             strikes. 100% therefore equals 0%, and the loop closes with
+ *             the hands already down — no reset, no jump.
+ * "Hands rise, type, settle, repeat" is a real typing burst, which is why
+ * looping it does not read as a restart. */
+@keyframes jtca-lift {
+  0% { transform: translate3d(0, 0, 0); }
+  1% { transform: translate3d(0, -25%, 0); }
+  2.2% { transform: translate3d(0, -50%, 0); }
+  4% { transform: translate3d(0, -75%, 0); }
+  6.6667% { transform: translate3d(0, 0, 0); }
+  8.8667% { transform: translate3d(0, -75%, 0); }
+  13.6667% { transform: translate3d(0, 0, 0); }
+  15.8667% { transform: translate3d(0, -75%, 0); }
+  20.3333% { transform: translate3d(0, 0, 0); }
+  22.5333% { transform: translate3d(0, -75%, 0); }
+  26.6667% { transform: translate3d(0, 0, 0); }
+  28.1667% { transform: translate3d(0, -50%, 0); }
+  29.6667% { transform: translate3d(0, 0, 0); }
+  31.5% { transform: translate3d(0, -50%, 0); }
+  33.3333% { transform: translate3d(0, 0, 0); }
+  35.1667% { transform: translate3d(0, -50%, 0); }
+  37% { transform: translate3d(0, 0, 0); }
+  38.5% { transform: translate3d(0, -50%, 0); }
+  40% { transform: translate3d(0, 0, 0); }
+  42.2% { transform: translate3d(0, -75%, 0); }
+  47% { transform: translate3d(0, 0, 0); }
+  49.2% { transform: translate3d(0, -75%, 0); }
+  53.6667% { transform: translate3d(0, 0, 0); }
+  55.8667% { transform: translate3d(0, -75%, 0); }
+  60% { transform: translate3d(0, 0, 0); }
+  61.5% { transform: translate3d(0, -50%, 0); }
+  63% { transform: translate3d(0, 0, 0); }
+  64.8333% { transform: translate3d(0, -50%, 0); }
+  66.6667% { transform: translate3d(0, 0, 0); }
+  68.5% { transform: translate3d(0, -50%, 0); }
+  70.3333% { transform: translate3d(0, 0, 0); }
+  71.8333% { transform: translate3d(0, -50%, 0); }
+  73.3333% { transform: translate3d(0, 0, 0); }
+  75.5333% { transform: translate3d(0, -75%, 0); }
+  80.3333% { transform: translate3d(0, 0, 0); }
+  82.5333% { transform: translate3d(0, -75%, 0); }
+  87% { transform: translate3d(0, 0, 0); }
+  89.2% { transform: translate3d(0, -75%, 0); }
+  93.3333% { transform: translate3d(0, -25%, 0); }
+  96.3333% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+/* Blink. Rows 0-3 = eyes open, rows 4-7 = eyes shut; -50% of this layer's
+ * own eight-row height is exactly the four-row jump between the two halves.
+ *
+ * Three blinks per 12.7s cycle, placed so the GAPS are uneven — 3.4s, 5.2s
+ * then 4.1s — which is what keeps it from reading as a metronome. Each blink
+ * is held for 1.1% (~140ms), the real duration of a human blink. CSS cannot
+ * produce true randomness, and driving this from JS would mean a timer
+ * re-rendering the component every few seconds; an irregular cycle whose
+ * period shares no factor with the 2.6s and 3.6s layers gives the same
+ * impression with zero renders and zero drift.
+ *
+ * 100% repeats the 0% state so the loop closes invisibly. */
+@keyframes jtca-blink {
+  0% {
+    transform: translate3d(0, 0, 0); /* open */
+  }
+  15.7% {
+    transform: translate3d(0, -50%, 0); /* shut — t = 2.0s */
+  }
+  16.8% {
+    transform: translate3d(0, 0, 0);
+  }
+  42.5% {
+    transform: translate3d(0, -50%, 0); /* shut — t = 5.4s */
+  }
+  43.6% {
+    transform: translate3d(0, 0, 0);
+  }
+  83.4% {
+    transform: translate3d(0, -50%, 0); /* shut — t = 10.6s */
+  }
+  84.5%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Gentle breathing — a slow rise/settle with a whisper of scale. */
+@keyframes jtca-breathe {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -2.2%, 0) scale(1.014);
+  }
+}
+
+/* Frame selection. Cell 0..4 == supplied frames 1..5; -20% per cell.
+ *
+ * The order is authored, not 1-2-3-4-5: the five supplied poses fall into a
+ * lean-back pair (frames 1, 2 — cap low) and a lean-in trio (frames 3, 4, 5
+ * — cap high), so the sequence alternates between them to produce four cap
+ * bounces per cycle while keeping every head displacement small enough that
+ * the sway reads as body motion rather than a jump. Frames 2, 4 and 5 are
+ * the poses the artist drew with impact marks at the keys, so the seven
+ * stops that land on them are the keystrokes, and `jtca-keys` below dips on
+ * exactly those seven stops.
+ *
+ * 100% repeats the 0% cell so the loop closes without a visible jump. */
+@keyframes jtca-frames {
+  0% {
+    transform: translate3d(-80%, 0, 0); /* frame 5 — strike */
+  }
+  11% {
+    transform: translate3d(-20%, 0, 0); /* frame 2 — strike */
+  }
+  20% {
+    transform: translate3d(-80%, 0, 0); /* frame 5 — strike */
+  }
+  31% {
+    transform: translate3d(0, 0, 0); /* frame 1 — release */
+  }
+  41% {
+    transform: translate3d(-80%, 0, 0); /* frame 5 — strike */
+  }
+  50% {
+    transform: translate3d(-40%, 0, 0); /* frame 3 — release */
+  }
+  61% {
+    transform: translate3d(-60%, 0, 0); /* frame 4 — strike */
+  }
+  70% {
+    transform: translate3d(-40%, 0, 0); /* frame 3 — release */
+  }
+  80% {
+    transform: translate3d(-80%, 0, 0); /* frame 5 — strike */
+  }
+  89% {
+    transform: translate3d(-20%, 0, 0); /* frame 2 — strike */
+  }
+  100% {
+    transform: translate3d(-80%, 0, 0); /* == 0%, seamless */
+  }
+}
+
+/* Keystroke recoil. One dip per strike stop in `jtca-frames` (0, 11, 20, 41,
+   61, 80, 89%), each peaking ~3% after the frame lands so the shake reads as
+   a consequence of the impact rather than a separate wobble, then easing
+   back to rest before the next strike. Because this moves the whole window,
+   the laptop shakes WITH the mascot — it cannot detach. Depths and rotation
+   signs are deliberately irregular. Rotation stays under half a degree: the
+   artwork is pixel art and larger rotations resample into visible mush. */
+@keyframes jtca-keys {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  3% {
+    transform: translate3d(0, 1.8%, 0) rotate(0.28deg);
+  }
+  8% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  14% {
+    transform: translate3d(0, 1.4%, 0) rotate(-0.2deg);
+  }
+  19% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  23% {
+    transform: translate3d(0, 1.9%, 0) rotate(0.3deg);
+  }
+  28% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  44% {
+    transform: translate3d(0, 1.5%, 0) rotate(-0.24deg);
+  }
+  49% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  64% {
+    transform: translate3d(0, 1.7%, 0) rotate(0.26deg);
+  }
+  69% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  83% {
+    transform: translate3d(0, 1.3%, 0) rotate(0.18deg);
+  }
+  88% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  92% {
+    transform: translate3d(0, 1.6%, 0) rotate(-0.22deg);
+  }
+  97%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+}
+
+/* ── Keystroke indicator ──────────────────────────────────────────────── */
+/* Three JTC-red keys lighting in sequence, beneath the figure. */
+
+.jtca-keycaps {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.jtca-keycaps > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: #ee1c25;
+  opacity: 0.2;
+  will-change: transform, opacity;
+  animation: jtca-keycap 1.3s ease-in-out infinite;
+}
+
+.jtca-keycaps > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.jtca-keycaps > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes jtca-keycap {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  45% {
+    opacity: 1;
+    transform: translate3d(0, 1px, 0) scale(0.9);
+  }
+}
+
+/* ── Message + animated ellipsis ──────────────────────────────────────── */
+
+.jtca-message {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+  font-weight: 500;
+  color: #64748b; /* slate-500 — matches the other SectionCard states */
+  text-align: center;
+}
+
+.jtca-ellipsis > span {
+  opacity: 0.25;
+  animation: jtca-ellipsis 1.4s steps(1, end) infinite;
+}
+.jtca-ellipsis > span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.jtca-ellipsis > span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes jtca-ellipsis {
+  0%,
+  75%,
+  100% {
+    opacity: 0.25;
+  }
+  25%,
+  70% {
+    opacity: 1;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+/* Users who ask for less motion still get the artwork and the message —
+   just held perfectly still on a single resting pose. The container's own
+   opacity fade is a cross-fade rather than motion, so it is intentionally
+   preserved. `.jtca-sprite` falls back to its static -40% transform (pose 3,
+   hands on the keys, no impact marks), `.jtca-lift` to -50% (hands raised and
+   clearly visible, which is the requested default) and `.jtca-blink` to 0
+   (eyes open) — dropping the animations must never leave any of the three
+   windows resting on a half-cell. */
+@media (prefers-reduced-motion: reduce) {
+  .jtca-figure,
+  .jtca-keys,
+  .jtca-lift,
+  .jtca-blink,
+  .jtca-sprite,
+  .jtca-keycaps > span,
+  .jtca-ellipsis > span {
+    animation: none;
+  }
+  .jtca-keycaps > span {
+    opacity: 0.55;
+  }
+  .jtca-ellipsis > span {
+    opacity: 1;
+  }
+}

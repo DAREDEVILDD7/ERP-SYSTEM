@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+} from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
 import {
@@ -14,6 +22,33 @@ import {
 const NotificationContext = createContext(null);
 
 const POLL_MS = 6000; // 6-second poll — primary delivery for cross-user notifications
+
+/**
+ * True when a freshly polled list is indistinguishable from the one in state.
+ *
+ * The poll fires every 6s for the whole session and almost always returns the
+ * same rows. Writing them into state regardless produced a brand-new array
+ * every 6s, which changed the context value and re-rendered every
+ * `useNotifications()` consumer — the navbar bell, the banner host, the chat
+ * badge — around 600 times an hour for no visible change. Bailing out keeps the
+ * array (and therefore the memoised context value) referentially identical, so
+ * an idle poll costs nothing downstream.
+ *
+ * Comparing `notification_id` positionally plus `is_read` is exact for this
+ * table, not an approximation: rows are insert/delete only and `is_read` is the
+ * single column any code path ever UPDATEs (see api/notifications.js and
+ * enable_notifications.sql). Any insert, delete or reorder changes the id
+ * sequence and is caught.
+ */
+function sameNotifications(a, b) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].notification_id !== b[i].notification_id) return false;
+    if (a[i].is_read !== b[i].is_read) return false;
+  }
+  return true;
+}
 
 export function NotificationProvider({ children }) {
   const { profile } = useAuth();
@@ -70,7 +105,9 @@ export function NotificationProvider({ children }) {
 
       knownIds.current = new Set(data.map(n => n.notification_id));
       initialised.current = true;
-      setNotifications(data);
+      // Returning `prev` unchanged makes React bail out of the re-render
+      // entirely — see sameNotifications above.
+      setNotifications(prev => (sameNotifications(prev, data) ? prev : data));
     } catch (err) {
       console.error('[Notifications] load failed:', err?.message ?? err);
     } finally {
@@ -224,12 +261,23 @@ export function NotificationProvider({ children }) {
     setNewNotif(null);
   }, []);
 
+  // Memoised for the same reason as PermissionsContext: an inline literal is a
+  // new object on every provider render, which defeats the poll bail-out above
+  // and re-renders every consumer whenever anything inside this provider ticks.
+  // The callbacks are all useCallback-wrapped and the rest are primitives or
+  // the bail-out-stable array, so these dependency comparisons are exact.
+  const value = useMemo(() => ({
+    notifications, unreadCount, loading, newNotif,
+    markRead, markAllRead, markAllByTypeRead, markChatThreadRead,
+    removeNotif, clearAll, dismissBanner, reload: load,
+  }), [
+    notifications, unreadCount, loading, newNotif,
+    markRead, markAllRead, markAllByTypeRead, markChatThreadRead,
+    removeNotif, clearAll, dismissBanner, load,
+  ]);
+
   return (
-    <NotificationContext.Provider value={{
-      notifications, unreadCount, loading, newNotif,
-      markRead, markAllRead, markAllByTypeRead, markChatThreadRead,
-      removeNotif, clearAll, dismissBanner, reload: load,
-    }}>
+    <NotificationContext.Provider value={value}>
       {children}
     </NotificationContext.Provider>
   );

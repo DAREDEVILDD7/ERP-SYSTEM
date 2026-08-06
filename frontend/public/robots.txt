@@ -1,3 +1,4 @@
 # https://www.robotstxt.org/robotstxt.html
+# Internal operations tool — not for public indexing.
 User-agent: *
-Disallow:
+Disallow: /

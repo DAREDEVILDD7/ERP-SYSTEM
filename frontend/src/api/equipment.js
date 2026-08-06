@@ -57,22 +57,6 @@ export async function getSerialNumbersByType(typeId) {
   return data ?? [];
 }
 
-export async function getEquipmentUnit(id) {
-  const { data, error } = await supabase
-    .from("equipment_units")
-    .select(
-      `
-      *,
-      equipment_types(*),
-      dispatches(dispatch_id, destination, status, dispatch_date, driver_name, return_date),
-      maintenance(maintenance_id, issue, status, service_date, start_date, completion_date, cost_kwd)
-    `,
-    )
-    .eq("equipment_id", id)
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 export async function createEquipmentType(payload) {
   // Validate required fields
@@ -97,16 +81,6 @@ export async function createEquipmentType(payload) {
   return data;
 }
 
-export async function updateEquipmentType(id, payload) {
-  const { data, error } = await supabase
-    .from("equipment_types")
-    .update(payload)
-    .eq("type_id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 export async function createEquipmentUnit(payload) {
   const { data, error } = await supabase

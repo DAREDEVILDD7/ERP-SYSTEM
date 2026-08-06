@@ -14,7 +14,7 @@ import { hasPermission } from '../../lib/rolePermissions';
 import StatusBadge from '../../components/common/StatusBadge';
 import { SkeletonTable } from '../../components/common/Skeleton';
 import EmptyState from '../../components/common/EmptyState';
-import { downloadPurchaseOrderPDF } from '../../lib/pdfGenerator';
+import { downloadPurchaseOrderPDF } from '../../lib/pdfGeneratorAsync';
 import {
   Plus, ShoppingCart, X, Loader2, RefreshCw, FileText,
   Send, Download, Trash2, CheckCircle, Eye, Package, Search,

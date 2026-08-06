@@ -12,7 +12,7 @@ import {
   Calendar, FileText, AlertTriangle, Clock,
 } from 'lucide-react';
 import { format, addDays } from 'date-fns';
-import { downloadInvoicePDF, downloadZReportPDF } from '../../lib/pdfGenerator';
+import { downloadInvoicePDF, downloadZReportPDF } from '../../lib/pdfGeneratorAsync';
 import { fetchAdminStats } from '../../api/dashboard';
 import { supabase } from '../../lib/supabaseClient';
 import toast from 'react-hot-toast';

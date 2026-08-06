@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Component } from "react";
+import { Component, lazy } from "react";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "./context/AuthContext";
 import { PermissionsProvider } from "./context/PermissionsContext";
@@ -7,22 +7,41 @@ import { NotificationProvider } from "./context/NotificationContext";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import Layout from "./components/common/Layout";
 import Login from "./pages/auth/Login";
-import DashboardRouter from "./pages/DashboardRouter";
-import RequirementsPage from "./pages/sales/RequirementsPage";
-import QuotationsPage from "./pages/sales/QuotationsPage";
-import CustomersPage from "./pages/sales/CustomersPage";
-import EquipmentPage from "./pages/operations/EquipmentPage";
-import DispatchManagePage from "./pages/dispatch/DispatchManagePage";
-import MaintenanceJobsPage from "./pages/maintenance/MaintenanceJobsPage";
-import InvoicesPage from "./pages/finance/InvoicesPage";
-import ChatPage from "./pages/chat/ChatPage";
-import UserManagement from "./pages/admin/UserManagement";
-import AuditLogs from "./pages/admin/AuditLogs";
-import PasswordResetRequests from "./pages/admin/PasswordResetRequests";
-import PermissionsManagement from "./pages/admin/PermissionsManagement";
-import ProcurementPage from "./pages/procurement/ProcurementPage";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
+
+/* Every routed page is code-split. Before this, all 15 pages plus everything
+   they pull in (recharts + d3 for the dashboards, jspdf for the PDF exports,
+   the big Dispatch / Procurement / Equipment screens) sat in the single
+   main bundle, so a Sales user downloaded the Procurement module and an
+   Admin downloaded the chart library just to reach the login screen.
+   `lazy()` moves each into its own chunk, fetched on first navigation.
+
+   `Login` is deliberately NOT lazy: it is the unauthenticated landing route
+   and it hands the truck animation's logo over to its own static <img>
+   (see AppLoadingGate / LogoDockContext). Deferring it behind a chunk fetch
+   would put a network round-trip inside that hand-off, which is exactly the
+   timing the loading-gate invariants forbid. Layout / ProtectedRoute stay
+   eager for the same reason on the authenticated side — they must render
+   the shell instantly so the Suspense fallback appears *inside* the page
+   area rather than replacing the sidebar and navbar.
+
+   The Suspense boundary lives in Layout, around <Outlet />. */
+const DashboardRouter = lazy(() => import("./pages/DashboardRouter"));
+const RequirementsPage = lazy(() => import("./pages/sales/RequirementsPage"));
+const QuotationsPage = lazy(() => import("./pages/sales/QuotationsPage"));
+const CustomersPage = lazy(() => import("./pages/sales/CustomersPage"));
+const EquipmentPage = lazy(() => import("./pages/operations/EquipmentPage"));
+const DispatchManagePage = lazy(() => import("./pages/dispatch/DispatchManagePage"));
+const MaintenanceJobsPage = lazy(() => import("./pages/maintenance/MaintenanceJobsPage"));
+const InvoicesPage = lazy(() => import("./pages/finance/InvoicesPage"));
+const ChatPage = lazy(() => import("./pages/chat/ChatPage"));
+const UserManagement = lazy(() => import("./pages/admin/UserManagement"));
+const AuditLogs = lazy(() => import("./pages/admin/AuditLogs"));
+const PasswordResetRequests = lazy(() => import("./pages/admin/PasswordResetRequests"));
+const PermissionsManagement = lazy(() => import("./pages/admin/PermissionsManagement"));
+const ProcurementPage = lazy(() => import("./pages/procurement/ProcurementPage"));
+const AnalyticsPage = lazy(() => import("./pages/analytics/AnalyticsPage"));
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -58,11 +77,6 @@ class ErrorBoundary extends Component {
     return this.props.children;
   }
 }
-
-// eslint-disable-next-line no-unused-vars
-const Placeholder = ({ name }) => (
-  <div className="card p-8 text-center text-gray-400">{name} — coming soon</div>
-);
 
 export default function App() {
   return (
@@ -186,6 +200,14 @@ export default function App() {
                 element={
                   <ProtectedRoute navKey="permissions">
                     <PermissionsManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="analytics"
+                element={
+                  <ProtectedRoute navKey="analytics">
+                    <AnalyticsPage />
                   </ProtectedRoute>
                 }
               />

@@ -111,6 +111,238 @@ password manually via the existing user-management RPC.
     (hardcoded blues / indigos scoped to their own components) and are
     intentionally not touched.
 
+- **Analytics in-panel loading animation — JTC-capped Claude**
+  (`frontend/public/analytics/claude-jtc-typing.png`,
+  `frontend/src/components/analytics/ClaudeTypingLoader.jsx`,
+  `frontend/src/components/analytics/ClaudeTypingLoader.css`,
+  `frontend/src/components/analytics/SectionCard.jsx`)
+  - The Analytics module now has its own branded loader: the JTC-capped
+    Claude mascot working away while an insight is generated. It replaces
+    only the generic `Loader2` spinner that previously occupied
+    `SectionCard`'s `isLoading` branch. The truck loading animation,
+    `AppLoadingGate`, the sidebar logo replay and every other surface are
+    untouched, and the loader's CSS is entirely `jtca-` prefixed (JTC
+    Analytics) so it cannot reach them.
+  - **When it shows — two triggers, one shared timing policy.** The same
+    component, asset instance, CSS, keyframes and timings serve both; only
+    the message string differs, and nothing is duplicated or re-tuned per
+    site:
+    1. **Entering the workspace** (sidebar → `/analytics`): `AnalyticsPage`
+       mounts and the animation covers the chat-surface card while the
+       transcript and prompt picker are held back, then they mount and
+       cross-fade in underneath it. The page's own hero header (title,
+       window selector, Refresh/Reset) stays visible and interactive the
+       whole time — only the content area below it is covered. Navigating
+       away and back re-mounts the page and replays it.
+    2. **Submitting a prompt**: each answer mounts a fresh `SectionCard`,
+       so the animation runs over that answer's card before its content
+       appears.
+  - **Minimum 3s, and longer when the work is slower.** Both sites gate
+    visibility through `useMinDurationGate` (exported from
+    `ClaudeTypingLoader.jsx` alongside `ANALYTICS_LOADER_MIN_MS = 3000`, so
+    the two triggers can never drift apart). The gate is a **floor, not a
+    delay**: consumers OR it with their own pending state
+    (`gate || isLoading`), so the underlying query still fires on mount
+    exactly as before — the animation simply cannot leave early, and stays
+    up past 3s whenever the data is still in flight. This is what stops a
+    react-query-cached answer from flashing the animation for ~80ms; a
+    cached section now animates for the full window like any other. It is
+    one shot per mount, which lines up exactly with both triggers (page
+    mount / new SectionCard per prompt). Manual **Refresh** deliberately
+    does *not* re-trigger it — that path sets `isRefetching`, not
+    `isLoading`, and keeps the existing spinning-icon affordance.
+  - **Scoped to the panel, never full-screen.** It renders
+    `position: absolute; inset: 0` inside `SectionCard`'s body area — which
+    is why that wrapper gained `relative` (load-bearing). Sidebar, header,
+    chat transcript, window selector and prompt picker all stay visible and
+    interactive throughout. Because it is absolutely positioned, neither its
+    arrival nor its departure can shift the card's layout. It is centred on
+    both axes, sized `clamp(92px, 40%, 150px)` so it scales with the panel
+    and is hard-capped against overflowing short or narrow cards. (Widened
+    from `clamp(68px, 30%, 112px)` when the square single-pose asset was
+    replaced by the landscape typing sheet, so the mascot keeps the same
+    apparent size now that a laptop sits beside it; the rendered box is
+    *shorter* than before, so vertical space in the card is unchanged or
+    freer.)
+  - **Motion** is `transform` only, so the whole loader stays on the
+    compositor — including the frame stepping, which is a stepped translate
+    of the sheet behind a fixed window rather than a `background-position`
+    repaint. Five deliberately separate nested layers: `.jtca-figure` runs
+    the slow breathing loop (3.6s), `.jtca-keys` runs the keystroke dip /
+    laptop shake (2.6s, 7 irregular dips so it reads as real typing rather
+    than a metronome), `.jtca-lift` selects the hand-height row (7.8s,
+    `steps(1, end)`), `.jtca-blink` selects the eyes-open/shut row (12.7s,
+    `steps(1, end)`) and `.jtca-sprite` selects the drawn pose column (2.6s,
+    `steps(1, end)`). They are nested rather than merged into one keyframe
+    set because five animations on one element would fight over the single
+    `transform` property. Nesting is also what addresses the sheet's two row
+    axes at once: `.jtca-lift` is 4 rows tall and `.jtca-blink`, wrapping it,
+    is 2 lift-layers tall, so their translates add up to
+    `row = blink * 4 + lift`. `.jtca-keys` and `.jtca-sprite` share the 2.6s
+    period, which is what phase-locks the shake to the keystrokes so it
+    cannot drift, and `.jtca-lift`'s 7.8s is exactly 3× it for the same
+    reason; breathing's 3.6s and the blink's 12.7s are deliberately
+    non-harmonic with it and with each other (26, 36 and 127 tenths of a
+    second are mutually coprime), so the composite pose only repeats every
+    ~99 min and the loop never reads as a short mechanical cycle. `translateY` is in `%` (relative to the
+    element's own height) so the motion scales with the artwork and needs no
+    per-breakpoint retuning. Rotation is held under 0.3° — the artwork is
+    pixel art and larger rotations resample into visible mush.
+  - **Exactly one `<img>` is ever rendered, and it is never recreated.** The
+    element is created once per mount; the frames come from a stepped
+    `transform` on that single element, so nothing is duplicated, remounted or
+    key-swapped to produce them. `src` is a module-level constant, there is no
+    list rendering, and the two state hooks in the component (fade lifecycle,
+    asset-error fallback) touch neither `src` nor `key`. Toggling `visible`
+    only changes an ancestor's inline opacity.
+    - **Regression fixed (2026-08-05): `.jtca-sprite` must keep
+      `max-width: none`.** Tailwind's preflight ships
+      `img, video { max-width: 100%; height: auto }`. Because `max-width` is a
+      different property from `width`, the rule's `width: 500%` did *not*
+      override it — preflight capped the used width at one cell and squeezed
+      the whole 5-cell sheet into the window, which rendered as **~5 Claudes
+      side by side, squashed 5:1**, and was reported as the loader showing
+      about five Claudes instead of one. It was purely a CSS cascade bug: the
+      DOM held a single `<img>` the whole time, so there were never duplicate
+      renders, remounts or `key` changes to chase. `height` is already won
+      back by class specificity; both are now pinned in the rule. Any future
+      sheet wider than its window needs the same reset.
+  - **Fade-out contract.** `visible` going false does not unmount
+    immediately: the container fades over 260ms and only then unmounts, so
+    the `<img>` is the same element throughout with only an ancestor's
+    opacity changing — the sheet is never re-decoded or re-rendered. Results
+    mount the instant loading ends and cross-fade in underneath the
+    departing loader. A white wash is applied inline *only* during the exit
+    frame (transparent while loading, so the loader reads as part of the
+    glass card rather than a pale box on top of it) which masks the
+    just-mounted charts instead of letting artwork and charts briefly
+    superimpose.
+  - **Exceptions / accessibility.** If the asset 404s or fails to decode,
+    `onError` degrades to the message plus keystroke dots rather than
+    showing a broken-image glyph. `prefers-reduced-motion: reduce` holds the
+    artwork perfectly still (the opacity cross-fade is kept — it is not
+    motion) on a deliberately chosen static frame: pose 3 with the hands
+    raised off the keys and the eyes open. Each of the three stepped layers'
+    static `transform` is a whole multiple of one cell, so dropping the
+    animations can never leave a window resting on a half-cell.
+    `role="status" aria-live="polite"` announces progress.
+  - **The artwork — a 5-pose typing sheet (2026-08-05).** The long-standing
+    blocker in this area is resolved: five poses were supplied, each drawing
+    the mascot, the JTC cap, **both arms with hands on a laptop keyboard**,
+    and the laptop. They are built into `claude-jtc-typing.png` (1445×1224,
+    289×153 cells) by `frontend/scripts/build_claude_typing_sheet.py`: five
+    pose columns × eight rows, where `row = blink * 4 + lift` — four hand
+    heights, eyes open (rows 0–3) then eyes shut (rows 4–7) — so the typing,
+    the cap bounce and the head
+    movement are now *drawn* rather than faked with transforms. The previous
+    single-pose flat bitmap (`claude-jtc.svg`, 500×500, 1 `<image>` / 0
+    `<path>` / 0 `<g>`, no arms/hands/laptop/keyboard) is what made this
+    genuinely not implementable before; it was referenced by nothing and
+    was deleted in the Vercel cleanup pass, since everything in `public/`
+    is uploaded to the CDN as-is. Git history keeps the provenance.
+    - **The sheet is generated from the five PNGs, and the normalisation is
+      why it does not judder.** The poses were drawn independently, so:
+      annotation badges (poses 1, 2, 4) are stripped; each pose is registered
+      by *integer translation* onto two rigid world anchors — the laptop lid
+      tip (x) and the ground-line top (y); the ground line, whose thickness
+      (4–6 rows) and end points differ per pose, is replaced by one canonical
+      band laid behind every cell; every cell gets an 8px transparent gutter.
+      Interocular distance varies ≤1.5%, so no rescale is applied — that
+      would blur the pixel art. Registering on the *world* rather than on the
+      mascot is deliberate: it preserves each pose's own hand-to-keyboard
+      contact exactly as drawn. Keep all of that if the sheet is rebuilt.
+      Cells are authored at 578×306 and downscaled to 289×153 **one cell at a
+      time**: resizing the assembled sheet let LANCZOS pull each cell's
+      neighbour into its gutter, which put a faint ghost of the row above into
+      every cell and broke both the gutter invariant and the "a lift row
+      differs from its rest row only at the arm" invariant. The build now also
+      forces any destination row/column whose whole source footprint was empty
+      back to transparent, and re-asserts the gutters on the shipped pixels.
+    - **The frame order is authored, not sequential.** The poses split into a
+      lean-back pair (1, 2 — cap low) and a lean-in trio (3, 4, 5 — cap
+      high). Alternating between the groups yields four cap bounces per cycle
+      while holding every head step to ≤4.6 rendered px, so the residual
+      lean reads as body sway. Poses 2, 4 and 5 carry the artist's impact
+      marks at the keys, so the seven stops that land on them are the
+      keystrokes, and `.jtca-keys` dips on exactly those seven. Playing
+      1-2-3-4-5 instead reintroduces a 45px monotonic drift with a snap-back
+      at the loop point.
+    - **Blink (added): a generated row, on its own timer.** All five supplied
+      poses have identical fully-open eyes, so the shut variants are derived at
+      build time from each pose's own pixels — the eye rect, padded 2px to
+      swallow its anti-aliased fringe, is flooded with the dominant face tone
+      sampled from an annulus around it, then a 4px bar of the eye's own colour
+      is drawn at 58% height as the lid. The tone is taken from an annulus
+      rather than the rows touching the eye, because those carry a highlight
+      that leaves a visibly lighter rectangle. The generator asserts the shut
+      row differs from the open row *only* inside the padded eye boxes.
+      Because the pose is the sheet's column and the blink its row, the blink
+      has an independent 12.7s timer: three blinks at t = 2.0 / 5.4 / 10.6s,
+      i.e. gaps of 3.4 / 5.2 / 4.1s — inside the requested 3–6s band and
+      deliberately uneven. A JS timer was avoided on purpose; it would
+      re-render the component every few seconds for no visual gain.
+    - **Hands lift and press (added): three generated rows per pose.** No
+      supplied pose has raised hands — the lowest fingertip is at y=286–288 in
+      all five, a 2px spread — so rows 1–3 are synthesised from each pose's
+      *own* pixels rather than drawn. For every column left of
+      `torso_left − 6`, the whole below-the-cut content of that column slides
+      up 7 / 13 / 20 sheet px as one unit, and whatever the hand vacates is
+      filled from a laptop plate reconstructed from the union of all five
+      poses (each occludes a different 10–18% of the laptop, so together they
+      cover it). Nothing is invented: every written pixel is either the arm's
+      own flat colour or a laptop pixel that exists in another pose, and the
+      cut is invisible because the tentacle is a single flat colour. Sliding
+      the *whole* column matters — an earlier version copied only body pixels
+      and the original arm showed through the shifted copy's gaps, shredding
+      any arm drawn as more than one run per column. The build asserts each
+      lift row differs from its rest row only left of `torso_left − 6` and
+      above the ground line, so the torso, head, cap, eyes, feet, laptop lid
+      and ground are provably untouched; measured, arm material moves up
+      15–20 sheet px per step.
+      - **`.jtca-lift` runs on 7.8s = exactly 3 × the 2.6s pose cycle**, so
+        every tap lands on one of that cycle's seven impact-mark stops and can
+        never drift off the drawn artwork. That forces the stop percentages to
+        be thirds — `(strike + 100j) / 3`, several of them repeating decimals.
+        The CSS carries 4dp, which holds all 18 taps within 0.003ms of their
+        strike; the first draft rounded to 1dp and 12 of the 18 quietly came
+        unstuck. Regenerate from the formula if the taps are ever retimed. One
+        cycle is a 312ms decelerating rise (78 / 94 / 140ms per row), 18
+        presses at ~2.3/second with gaps varying 234–728ms, then a settle back
+        onto the keys so 100% equals 0%.
+    - **What is still out of reach from this art — measured, not assumed.**
+      - *Per-hand alternation and wrist rotation*: body pixels form ONE
+        connected component of ~40,000px per pose covering the whole character
+        (x195–487, y88–298), with column heights climbing smoothly from ~25px
+        at the fingertips to 200px+ at the torso — there is no waist to cut
+        at. The lift above works precisely because it moves whole columns
+        vertically and needs no cut across the blob; separating left from
+        right, or rotating a wrist, does, and that tears the character or
+        seams the moment the parts diverge. There are also no drawn fingers.
+      - *The order is forced* under the fixed 7-strike timing — pose 4 only
+        neighbours pose 3, and 2↔5 is the only edge between two impact-marked
+        poses. Mean fingertip travel between poses is 4.3–7.3 sheet px and
+        every high-arm-change transition also swings the head 33–45 sheet px,
+        because each pose was drawn as a whole character rather than an
+        arms-only delta. Resequencing adds no hand motion — the generated lift
+        rows are what does.
+      - *No separate shadow exists* to compress for a laptop hop: the ground
+        line is a single world-wide rule spanning the full cell width, shared
+        by character and laptop. An independent hop also needs the laptop on
+        its own layer, and there are only ~9px of clearance to the ground
+        line — ~1.3 rendered px of press against a real clipping risk.
+      - **The single unblocker: arms-only pose deltas.** Ask for 4–6 poses
+        pixel-identical to pose 5 except the arms — same head, cap, torso,
+        eyes, laptop, ground — varying only (a) left down / right up, (b) its
+        mirror, and optionally (c) a wrist-rotated pair. Because only the arms
+        differ they can be sequenced at any cadence with zero head sway. That
+        is a sheet rebuild plus a sequence edit — no new mechanism. A rigged
+        layered SVG (a `<g>` per cap / head / eyes / arm / forearm / hand /
+        laptop with shoulder, wrist and hat-brim pivots) is the only route to
+        the independent laptop hop with squash-and-stretch.
+      - Do not fake any of it by stacking `clip-path`'d copies of a cell, and
+        do not author new Claude artwork — that is new brand art and an
+        animation-design change, and needs sign-off first.
+
 ## Cleanup & Vercel Readiness
 
 - **Pre-deploy cleanup pass** — a conservative, verification-first sweep
@@ -217,6 +449,124 @@ password manually via the existing user-management RPC.
   - No new warnings or errors were introduced: the only source-file
     edit deletes a comment line, and the removed common-component
     files had no consumers to break.
+
+- **Second pass — Vercel production optimisation (2026-08-06).** The
+  earlier pass was deliberately conservative and did not touch the
+  bundle's shape. This one did. Measured with `CI=true npm run build`
+  (warnings are errors) before and after, plus a source-map byte
+  attribution of every chunk.
+  - **Main bundle 637.55 kB → 217.63 kB gzipped (−66%)**, and CRA's
+    "bundle size is significantly larger than recommended" warning is
+    gone. Build output is clean with zero warnings; `npx eslint src`
+    is clean; all 29 emitted chunks pass `node --check`.
+  - **Route-level code splitting** (`App.js`, `Layout.jsx`). All 15
+    routed pages became `React.lazy`, with one `<Suspense
+    fallback={<LoadingSpinner fullscreen={false} />}>` inside Layout's
+    `<main>` around `<Outlet />`. That placement is deliberate: a
+    boundary above `<Routes>` would blank the sidebar and navbar on
+    every navigation. `Login` stays eager because deferring it would
+    insert a chunk fetch into the AppLoadingGate → Login logo hand-off,
+    whose timing is frozen. `Layout` / `ProtectedRoute` stay eager so
+    the shell paints instantly. Net effect: a Sales user no longer
+    downloads the Procurement module, and nobody downloads recharts to
+    reach the login screen.
+  - **jspdf moved behind the click** (`lib/pdfGeneratorAsync.js`, new).
+    `lib/pdfGenerator.js` statically imports jspdf + jspdf-autotable
+    (~130 kB gz), so Finance, Procurement and Quotation Detail were
+    paying for it on navigation. The new module wraps each exporter in a
+    deferred `import()` with identical signatures; the three call sites
+    only changed their import path. Verified in the build output: the
+    jspdf chunk is referenced by a `__webpack_require__.e()` call from
+    exactly two page chunks and is not a load-time dependency of either.
+  - **18 unused dependencies removed** — `@hookform/resolvers`, five
+    `@radix-ui/*`, four `@testing-library/*` (no test files exist),
+    `axios`, `class-variance-authority`, `html2canvas` (redundant: it is
+    already jspdf's own optional dependency), `react-hook-form`,
+    `react-pdf`, `tailwind-merge`, `web-vitals` (no `reportWebVitals`),
+    `zod`. 82 packages dropped from `node_modules`, which is install
+    time on every Vercel build.
+  - **59 unreachable source files removed** — found by walking the
+    import graph from `src/index.js`, not by grepping names. 57 were
+    0-byte scaffolding placeholders; the two with content
+    (`components/common/StatCard.jsx`, `context/RealtimeContext.jsx`)
+    were confirmed unreferenced. Seven directories became empty and were
+    removed. Note this supersedes the first pass's claim that `StatCard`
+    is "referenced and preserved" — it was not, and the `SkeletonStatCards`
+    hits that suggested otherwise are a different symbol.
+  - **14 dead top-level declarations removed** from `api/*` and `lib/*`
+    (`getCustomer`, `createDispatchFromQuotation`, `getEquipmentUnit`,
+    `updateEquipmentType`, `adminGetPasswordResetRequest`,
+    `getProcurement`, `updateVendor`, `getEquipmentStockByType`,
+    `daysFromDates`, `createSystemUser`, `createUserInSupabase`,
+    `sendPasswordReset`, `SkeletonCards`, `trend`). Two of them
+    (`createSystemUser`, `createUserInSupabase`) wrote directly into the
+    `users` table instead of going through `admin_create_user`, so they
+    also contradicted the RBAC model documented above — removing them
+    closes a copy-paste hazard as well as dead weight.
+  - **Notification poll no longer re-renders the app every 6 seconds.**
+    `NotificationContext` polls every 6s and used to call
+    `setNotifications(data)` unconditionally, producing a new array — and
+    therefore a new context value — even when nothing had changed. That
+    re-rendered the bell, the banner host and the chat badge ~600 times
+    an hour for no visible reason. It now bails out via
+    `setNotifications(prev => sameNotifications(prev, data) ? prev : data)`.
+    The comparison (positional `notification_id` + `is_read`) is exact
+    rather than approximate: notification rows are insert/delete only and
+    `is_read` is the single column any code path UPDATEs. Optimistic
+    local marks still reconcile correctly, because the comparison is
+    against current state, not against the previous fetch.
+  - **`AuthContext` and `NotificationContext` provider values are now
+    `useMemo`-wrapped**, matching the `PermissionsContext` pattern from
+    the first pass. Both sit above the whole tree, so an inline literal
+    handed every consumer a new value on any render.
+  - **Supabase Auth disabled in the client** (`supabaseClient.js`):
+    `autoRefreshToken` / `persistSession` / `detectSessionInUrl` all
+    `false`. There is no `supabase.auth.*` call anywhere in `src` — sign-in
+    is the `verify_login` RPC — so this only stops a refresh timer and a
+    URL parse for a session that never exists. No request path changes;
+    everything still goes out under the anon key exactly as before.
+  - **`queryClient` `cacheTime` → `gcTime`.** The v4 spelling was being
+    silently ignored by react-query v5. The value equals v5's default, so
+    this is a no-op at runtime — it just makes the setting real.
+  - **`frontend/vercel.json` (new)** — SPA rewrite plus cache headers.
+    It is in `frontend/`, not the repo root, because that is the app root
+    and Vercel reads the config from the configured Root Directory.
+    `/static/*` is `immutable` (webpack-hashed); `/logo/*` and
+    `/analytics/*` get `max-age=86400` + `stale-while-revalidate`
+    *instead* of `immutable`, because those filenames are stable and
+    `immutable` would pin a regenerated sprite sheet or logo piece in
+    returning users' caches for a year; `/index.html` is
+    `must-revalidate`. Also sets `nosniff`, `X-Frame-Options: DENY`,
+    `Referrer-Policy` and a `Permissions-Policy` deny-list. It
+    deliberately does not override build/install/output — the CRA preset
+    supplies those.
+  - **`frontend/.env.production` (new)** — `GENERATE_SOURCEMAP=false`.
+    CRA was emitting 12.3 MB of `.map` files that Vercel serves from the
+    CDN, publishing the full readable source of an internal tool. Deploy
+    output dropped from 17 MB to 5.2 MB. Browsers only fetch maps with
+    DevTools open, so users are unaffected.
+  - **Production shell metadata** — `index.html` and `manifest.json`
+    still carried the CRA defaults ("React App", "Web site created using
+    create-react-app", `theme_color: #000000`). Now titled *JTC Ops* with
+    the brand red, a `noindex` meta, and `robots.txt` changed from
+    `Disallow:` (allow-all) to `Disallow: /`. Added `preconnect` +
+    `dns-prefetch` to `%REACT_APP_SUPABASE_URL%` — CRA substitutes that at
+    build time, so it follows whichever project the deployment targets
+    instead of hard-coding a host, and it opens the TLS connection while
+    the bundle is still downloading.
+  - **Deliberately not touched, with measurements.** `framer-motion`
+    (~135 kB uncompressed) stays in the main bundle: both consumers
+    (`JTCLogoAnimation`, `SidebarLogoHover`) are on the boot path, and the
+    animation's asset paths and timing are frozen by the invariants above.
+    `public/logo/truck-initial.svg` is 1.19 MB — a base64 PNG in an SVG
+    wrapper — and is the single largest asset; lossless recompression was
+    measured at **0% gain** (900,770 B vs the existing 892,604 B) and
+    256-colour quantisation saves 39% but with a max per-channel error of
+    102, i.e. visible banding on a brand asset. Shipping it as WebP/AVIF
+    would cut it substantially but requires changing `TRUCK_IMG` in
+    `JTCLogoAnimation.jsx`, which needs explicit sign-off. These two are
+    the largest remaining costs and are documented so they are not
+    rediscovered and refactored by accident.
 
 ## Auth & Access
 

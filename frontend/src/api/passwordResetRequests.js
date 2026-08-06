@@ -38,14 +38,6 @@ export async function adminListPasswordResetRequests(adminUserId, includeResolve
   return data == null ? [] : data;
 }
 
-export async function adminGetPasswordResetRequest(adminUserId, requestId) {
-  const { data, error } = await supabase.rpc('admin_get_password_reset_request', {
-    p_admin_user_id: adminUserId,
-    p_request_id:    requestId,
-  });
-  if (error) throw new Error(error.message || 'Failed to load password reset request.');
-  return data && data[0] ? data[0] : null;
-}
 
 export async function adminStartPasswordResetRequest(adminUserId, requestId) {
   const { error } = await supabase.rpc('admin_start_password_reset_request', {

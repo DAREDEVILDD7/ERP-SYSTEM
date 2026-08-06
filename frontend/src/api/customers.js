@@ -18,19 +18,6 @@ export async function getCustomers(search = '') {
   return data ?? [];
 }
 
-export async function getCustomer(id) {
-  const { data, error } = await supabase
-    .from('customers')
-    .select(`
-      *,
-      requirements ( requirement_id, requirement_summary, status, created_at ),
-      quotations ( quotation_id, status, total_amount_kwd, quotation_date )
-    `)
-    .eq('customer_id', id)
-    .single();
-  if (error) throw error;
-  return data;
-}
 
 export async function createCustomer(payload) {
   const { data, error } = await supabase
