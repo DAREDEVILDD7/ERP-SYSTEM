@@ -109,6 +109,3 @@ export function canAccess(userRole, navItem) {
   return ROLE_NAV[userRole]?.includes(navItem) ?? false;
 }
 
-export const ROLE_HOME = Object.fromEntries(
-  Object.values(ROLES).map(r => [r, '/dashboard'])
-);

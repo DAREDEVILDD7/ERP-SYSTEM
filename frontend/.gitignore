@@ -13,6 +13,9 @@
 
 # misc
 .DS_Store
+# scripts/ holds the asset build tool; running it drops bytecode next to it
+__pycache__/
+*.pyc
 .env.local
 .env.development.local
 .env.test.local

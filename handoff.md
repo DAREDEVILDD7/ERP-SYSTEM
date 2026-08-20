@@ -19,7 +19,9 @@ framework preset and Root Directory `frontend`.
 - Production-shaped; recent shipped work in order: Vercel readiness
   pass; Super Admin RBAC + per-user module overrides; Admin-managed
   password-reset workflow; Analytics assistant (13 sections, brief,
-  loader).
+  loader); Neomorphism 3D dashboard theme (all 9 role dashboards).
+- **`87a6a7e` (doc restructure) has NOT been pushed.** Branch is 1
+  commit ahead of `origin/master`. Push when ready.
 - No active migration or deploy blocker at the time of writing.
 - Finance module is **UI-only** and awaiting stakeholder answers on
   `docs/Finance-Requirements-Discovery.md`.
@@ -30,9 +32,32 @@ None declared. The working tree carries uncommitted analytics work
 (see below) that reads as an iteration on the previously shipped
 analytics-assistant workstream.
 
-## Recently completed (last shipped push, `54ed343` on master)
+## Recently completed (latest local commit `87a6a7e`, not yet pushed)
 
-- **Vercel readiness.** Route-level code splitting via
+- **Doc restructure (`87a6a7e`).** Split the load-bearing reference
+  out of the giant `CLAUDE.md` / `handoff.md` pair into
+  `docs/architecture.md`, `docs/authorization.md`,
+  `docs/deployment.md`, `docs/analytics.md`, `docs/branding.md`.
+  `CLAUDE.md` holds persistent rules and pointers; this file
+  describes current state only. One stale contradiction resolved:
+  the password-reset RPC note about `role = 'Admin'` gating was
+  closed by `fix_password_reset_authorization.sql` (verified present)
+  via `_is_active_admin → fn_can_reset_passwords`.
+
+- **Neomorphism 3D dashboard theme.** All 9 role-based dashboards
+  converted to a neomorphism + 3D chart theme. Shared utilities live
+  in `src/components/dashboard/DashUtils.jsx` (`Bar3D`, `DonutCentre`,
+  `NEO_TOOLTIP_STYLE`, `PIE_FILTER_DEF`, `PIE_STYLE`). Tailwind
+  `surface` token changed from `#f8f9fa` to `#e2e8f0` in
+  `tailwind.config.js`. CSS classes (`neo-page`, `neo-card`,
+  `neo-kpi`, `neo-inset`, `neo-flat`, `neo-row`, `neo-divider`)
+  defined in `index.css`. Text color tokens updated from `text-gray-*`
+  to `text-slate-*` throughout. Do not deviate from this pattern
+  when adding new dashboards.
+
+Older, still relevant:
+
+- **Vercel readiness (`54ed343`).** Route-level code splitting via
   `lib/lazyRoute.js`, jspdf behind `lib/pdfGeneratorAsync.js`, 18
   unused deps removed, unreachable source files pruned,
   `vercel.json` created in `frontend/` (SPA rewrite + cache headers +
@@ -74,7 +99,7 @@ Uncommitted changes in the working tree:
   `frontend/src/lib/insightTemplates.js`,
   `frontend/src/pages/analytics/AnalyticsPage.jsx`,
   `frontend/src/lib/rolePermissions.js`,
-  `frontend/.gitignore`, `handoff.md`.
+  `frontend/.gitignore`.
 - **New (untracked):** `frontend/src/components/analytics/AnalysisBrief.jsx`,
   `frontend/src/components/analytics/DateRangeFilter.jsx`,
   `frontend/src/lib/analyticsLabels.js`,
@@ -174,14 +199,22 @@ Uncommitted changes in the working tree:
 
 ## Files recently modified
 
-Beyond the uncommitted changes above, the most recent shipped
-commit (`54ed343 vercel push fixed`) touched `vercel.json`. The
-work behind the recently completed items lives across the analytics
-tree, the auth/permissions tree, the loading tree, and the SQL
-migration files listed in `docs/`.
+Latest local commit `87a6a7e` (unpushed): created five files under
+`docs/` and rewrote `handoff.md`. The commit before that (`54ed343`)
+touched `vercel.json`. The work behind the older completed items
+lives across the analytics tree, the auth/permissions tree, the
+loading tree, and the SQL migration files listed in `docs/`.
+
+Uncommitted working-tree changes (see "Currently being worked on"):
+`frontend/src/api/analytics.js`, `sections.jsx`, `insightTemplates.js`,
+`AnalyticsPage.jsx`, `rolePermissions.js`, `frontend/.gitignore`.
+Untracked new files: `AnalysisBrief.jsx`, `DateRangeFilter.jsx`,
+`analyticsLabels.js`, `dateRange.js`, `insightBrief.js`,
+`scripts/claude-mascot-src.svg`.
 
 ## Next steps
 
+- **Push `87a6a7e`** to origin/master when ready (doc restructure commit).
 - Decide the scope for the uncommitted analytics iteration (which
   slices ship, which are still incubating) before committing.
 - Await Finance stakeholder answers on

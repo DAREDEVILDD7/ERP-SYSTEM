@@ -189,3 +189,67 @@
   .neo-inset { background: rgba(235, 238, 255, 0.90); }
   .neo-flat  { background: rgba(255, 255, 255, 0.95); }
 }
+
+/* ── Recharts: no visible border anywhere on a chart ─────────────────────
+   Recharts gives every chart type (Line/Area/Bar/Pie — they all render
+   through the same Surface/RootSurface component) `accessibilityLayer:
+   true` by default, which sets `tabIndex={0}` + `role="application"` on
+   `<svg class="recharts-surface">` so the chart is keyboard-operable. That
+   part is correct and stays — do NOT set `accessibilityLayer={false}`
+   anywhere; the element remains focusable and screen-reader navigable, only
+   the painted ring is suppressed.
+
+   The drag-to-zoom interaction's `onMouseDown` is what exposed this:
+   clicking to drag focuses that now-focusable SVG and the browser paints a
+   heavy default focus ring — read as a black rectangle around the plot.
+   Scoping the suppression to `:focus` alone was not enough, because Chrome
+   DOES match `:focus-visible` on a programmatically-focusable
+   `role="application"` element after a pointer click, so the ring came
+   straight back through the `:focus-visible` rule that replaced it.
+
+   Both states are therefore cleared, along with any UA border on the SVG
+   and wrapper, and any focusable descendant Recharts renders inside the
+   chart (tooltip triggers, the accessibility layer's own nodes). Charts
+   remain readable without the ring: every chart on this surface is paired
+   with a ranked list or table carrying the same figures as real text.
+
+   Axis lines themselves are turned off per-chart via `axisLine`/`tickLine`
+   props rather than here, so a chart that legitimately wants one can still
+   ask for it. Grid lines, ticks, labels and tooltips are untouched. */
+.recharts-wrapper,
+.recharts-surface {
+  border: none;
+}
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible,
+.recharts-wrapper *:focus,
+.recharts-wrapper *:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ── Analytics: series hover emphasis ────────────────────────────────────
+   Applied to a Recharts <Bar> layer while a DIFFERENT series in the same
+   chart is hovered, so the hovered series reads as the focused one — the
+   chart half of the same interaction `BarLegendChips` performs on the
+   labels, which is what makes the bar and its label behave as one unit
+   (the Pipeline Funnel's established behaviour, generalised).
+
+   Done in CSS on the series layer rather than by threading opacity through
+   `Bar3D`, because that shape component is shared with the role dashboards
+   and must not change. `prefers-reduced-motion` drops only the transition;
+   the emphasis itself stays, since it carries meaning rather than
+   decoration. */
+.jtc-series-dim {
+  opacity: 0.3;
+}
+.recharts-bar {
+  transition: opacity 0.15s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .recharts-bar {
+    transition: none;
+  }
+}

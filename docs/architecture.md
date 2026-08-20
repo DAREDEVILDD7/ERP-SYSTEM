@@ -25,8 +25,9 @@ router, and the neomorphism dashboard system.
   that briefly replaced the five-pose set. It is **untracked** — the
   only copy of supplied artwork lives here.
 - `docs/` — reference docs (this file, authorization, deployment,
-  analytics, branding). `docs/Finance-Requirements-Discovery.md` is
-  the Finance blueprint awaiting stakeholder answers.
+  analytics, branding, database-schema).
+  `docs/Finance-Requirements-Discovery.md` is the Finance blueprint
+  awaiting stakeholder answers.
 - `handoff.md` — living hand-off notes describing current state and
   work in flight.
 

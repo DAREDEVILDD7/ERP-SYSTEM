@@ -290,7 +290,13 @@ export default function UserManagement() {
 
       {selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+          {/* `max-h-[90vh]` + `overflow-y-auto` here (not on the fixed
+              backdrop) is what stops the User Permissions / Reset Password
+              sections pushing this card past the viewport with no way to
+              reach the clipped part — expanding either one grows the card's
+              own content, which now scrolls internally once it hits 90% of
+              the viewport height instead of extending past it. */}
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto overscroll-contain">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h3 className="font-semibold text-gray-900">Edit User</h3>
               <button onClick={() => setSelected(null)}><X size={18} className="text-gray-400" /></button>
@@ -533,7 +539,10 @@ export default function UserManagement() {
       {/* ── Create User (Super Admin only) ── */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+          {/* Same bounded-height treatment as the Edit User dialog above, for
+              the same reason — a short viewport (landscape mobile) must
+              scroll this card internally rather than clip it. */}
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto overscroll-contain">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <h3 className="font-semibold text-gray-900">New User</h3>
               <button onClick={() => setShowCreate(false)}><X size={18} className="text-gray-400" /></button>

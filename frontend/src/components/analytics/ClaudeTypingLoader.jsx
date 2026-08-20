@@ -194,12 +194,13 @@ export default function ClaudeTypingLoader({
         </div>
       )}
 
-      <div className="jtca-keycaps" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
-
+      {/* `.jtca-keycaps` (three small pulsing red squares beneath the
+          mascot) was removed as an unintended small-click artifact per
+          request. The impact marks on poses 2/4/5 remain the sole
+          "click effect", drawn into the sprite itself so the mascot's
+          typing rhythm still reads as strikes. The CSS rules are left
+          in place unchanged so nothing else in the loader can regress
+          from this edit; they are simply no longer referenced. */}
       <p className="jtca-message">
         {message}
         <span className="jtca-ellipsis" aria-hidden="true">

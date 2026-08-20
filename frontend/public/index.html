@@ -2,7 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <!--
+      Icon set lives in /icons/app-icons. The .ico is listed first and the SVG
+      second on purpose: browsers that understand image/svg+xml take the later,
+      resolution-independent declaration, while everything else (and the bare
+      /favicon.ico request some crawlers and older Safari still make) falls back
+      to the raster container. A root-level copy of favicon.ico is kept because
+      that default path is requested without consulting these tags at all.
+    -->
+    <link rel="icon" href="%PUBLIC_URL%/icons/app-icons/favicon.ico" sizes="48x48" />
+    <link
+      rel="icon"
+      href="%PUBLIC_URL%/icons/app-icons/icon.svg"
+      type="image/svg+xml"
+      sizes="any"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#EE1C25" />
     <meta
@@ -11,7 +25,17 @@
     />
     <!-- Internal tool; robots.txt already disallows crawling, this reinforces it. -->
     <meta name="robots" content="noindex, nofollow" />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <!--
+      iOS discards the alpha channel on home-screen icons and composites onto
+      black, so this 180x180 is the white-flattened variant of the supplied
+      artwork. Do not point this at icon-192.png.
+    -->
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="%PUBLIC_URL%/icons/app-icons/apple-touch-icon.png"
+    />
+    <meta name="apple-mobile-web-app-title" content="JTC Ops" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     <!--
       Every screen's first paint waits on a Supabase call, so open the TCP + TLS

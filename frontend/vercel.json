@@ -10,7 +10,7 @@
       ]
     },
     {
-      "source": "/(logo|analytics)/(.*)",
+      "source": "/(logo|analytics|icons)/(.*)",
       "headers": [
         {
           "key": "Cache-Control",

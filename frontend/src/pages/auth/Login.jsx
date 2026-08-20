@@ -1,7 +1,7 @@
-import { useState, useContext, useEffect, useRef } from 'react';
+import { useState, useContext, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Eye, EyeOff, Loader2, KeyRound, X, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, Loader2, KeyRound, X, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { LogoDockContext } from '../../components/loading/LogoDockContext';
 import { submitPasswordResetRequest } from '../../api/passwordResetRequests';
 
@@ -20,29 +20,127 @@ import { submitPasswordResetRequest } from '../../api/passwordResetRequests';
  * `transform` are toggled), so nothing about the page can jump or shift
  * when it reveals.
  * ------------------------------------------------------------------------- */
-const UI_REVEAL_DELAY_MS = 180; // pause after the logo lands, logo-alone
-const UI_REVEAL_STEP_MS  = 60;  // stagger between each successive element
+const UI_REVEAL_DELAY_MS = 180;
+const UI_REVEAL_STEP_MS  = 60;
 const UI_REVEAL_DUR_MS   = 280;
-// Same family of curve as the logo's own dock easing (JTCLogoAnimation's
-// DOCK_EASE), reused here only so the hand-off reads as one continuous
-// motion language - this file never touches that constant or the animation.
 const UI_REVEAL_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 const GENERIC_RESET_CONFIRMATION =
   'If your account is eligible, your password reset request has been submitted to an administrator.';
 
-// ─── Forgot Password Confirmation Modal ───────────────────────────────────────
-// Two-step: (1) ask the user whether to submit a reset request, capturing
-// the username; (2) show the generic confirmation regardless of outcome.
+/* ─── Client-side brute-force guard ────────────────────────────────────────
+ * Stored in localStorage so a page-refresh cannot bypass the lockout.
+ * The server's verify_login RPC is the authoritative gate; this guard
+ * prevents high-frequency automated attempts and gives immediate UI feedback.
+ *
+ * Progressive back-off (count never resets until a successful login):
+ *   3 fails  →  10 s
+ *   5 fails  →  30 s
+ *   8 fails  →   2 min
+ *  10 fails  →  15 min
+ *
+ * LOGIN_MIN_ERROR_MS: minimum wall-clock ms before a failed login error is
+ * surfaced. The "username not found" DB path returns immediately (no bcrypt);
+ * the "wrong password" path runs bcrypt and takes ~200–400 ms. Without this
+ * floor an attacker can enumerate valid usernames purely by measuring response
+ * time. Equalising both paths to ≥800 ms closes that timing oracle.
+ */
+const RL_KEY             = 'jtc_login_rl';
+const RL_TIERS           = [
+  { at: 3,  secs: 10  },
+  { at: 5,  secs: 30  },
+  { at: 8,  secs: 120 },
+  { at: 10, secs: 900 },
+];
+const LOGIN_MIN_ERROR_MS = 800;
+
+function rlLoad() {
+  try { return JSON.parse(localStorage.getItem(RL_KEY) || 'null') ?? { n: 0, until: 0 }; }
+  catch { return { n: 0, until: 0 }; }
+}
+function rlSave(s) { try { localStorage.setItem(RL_KEY, JSON.stringify(s)); } catch {} }
+function rlClear()  { try { localStorage.removeItem(RL_KEY); } catch {} }
+
+function useLoginRateLimit() {
+  const [rl, setRl] = useState(rlLoad);
+  const [secsLeft, setSecsLeft] = useState(0);
+
+  // Countdown ticker while locked
+  useEffect(() => {
+    if (!rl.until) { setSecsLeft(0); return; }
+    const tick = () => {
+      const s = Math.ceil((rl.until - Date.now()) / 1000);
+      setSecsLeft(s > 0 ? s : 0);
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [rl.until]);
+
+  const isLocked = Boolean(rl.until && Date.now() < rl.until);
+
+  const recordFail = useCallback(() => {
+    setRl(prev => {
+      const n = prev.n + 1;
+      // Find the highest applicable tier (tiers are in ascending `at` order)
+      let secs = 0;
+      for (const tier of RL_TIERS) { if (n >= tier.at) secs = tier.secs; }
+      const next = { n, until: secs ? Date.now() + secs * 1000 : 0 };
+      rlSave(next);
+      return next;
+    });
+  }, []);
+
+  const recordSuccess = useCallback(() => {
+    rlClear();
+    setRl({ n: 0, until: 0 });
+    setSecsLeft(0);
+  }, []);
+
+  return { isLocked, secsLeft, failCount: rl.n, recordFail, recordSuccess };
+}
+
+/* ─── Forgot-password per-session cooldown ──────────────────────────────────
+ * Module-level: survives dialog open/close cycles (component remounts) but
+ * is cleared on page reload. 60 s between submissions prevents request flooding
+ * of the admin queue.
+ */
+let fpwLastSubmit = 0;
+const FPW_COOLDOWN_S = 60;
+
+// ─── Forgot Password Confirmation Modal ──────────────────────────────────────
 function ForgotPasswordDialog({ defaultUsername, onClose }) {
-  const [username, setUsername] = useState(defaultUsername || '');
-  const [step, setStep]         = useState('confirm'); // 'confirm' | 'done'
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError]       = useState('');
+  const [username,    setUsername]    = useState(defaultUsername || '');
+  const [step,        setStep]        = useState('confirm');
+  const [submitting,  setSubmitting]  = useState(false);
+  const [error,       setError]       = useState('');
+  const [cooldownSec, setCooldownSec] = useState(0);
+
+  // Sync cooldown countdown if a submission was made earlier this session
+  useEffect(() => {
+    if (!fpwLastSubmit) return;
+    const tick = () => {
+      const s = Math.ceil((fpwLastSubmit + FPW_COOLDOWN_S * 1000 - Date.now()) / 1000);
+      setCooldownSec(s > 0 ? s : 0);
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    // Per-session cooldown: one submission every FPW_COOLDOWN_S seconds
+    if (fpwLastSubmit) {
+      const sinceS = Math.floor((Date.now() - fpwLastSubmit) / 1000);
+      if (sinceS < FPW_COOLDOWN_S) {
+        setError(`Please wait ${FPW_COOLDOWN_S - sinceS}s before submitting another request.`);
+        return;
+      }
+    }
+
     const trimmed = username.trim();
     if (!trimmed) {
       setError('Please enter your username.');
@@ -56,6 +154,7 @@ function ForgotPasswordDialog({ defaultUsername, onClose }) {
     } catch (_) {
       // Intentionally swallowed; do not surface backend errors here.
     } finally {
+      fpwLastSubmit = Date.now();
       setSubmitting(false);
       setStep('done');
     }
@@ -86,13 +185,22 @@ function ForgotPasswordDialog({ defaultUsername, onClose }) {
               Would you like to submit a password reset request to the system administrator?
             </p>
 
+            {cooldownSec > 0 && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-lg px-4 py-3 flex items-center gap-2">
+                <ShieldAlert size={15} className="shrink-0 text-amber-500" />
+                <span>Another request can be submitted in{' '}
+                  <span className="font-semibold tabular-nums">{cooldownSec}s</span>.
+                </span>
+              </div>
+            )}
+
             {error && (
               <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg px-4 py-3">
                 {error}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-3">
+            <form onSubmit={handleSubmit} className="space-y-3" noValidate>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
                 <input
@@ -102,7 +210,7 @@ function ForgotPasswordDialog({ defaultUsername, onClose }) {
                   value={username}
                   onChange={e => setUsername(e.target.value)}
                   autoComplete="username"
-                  maxLength={100}
+                  maxLength={64}
                   autoFocus
                 />
               </div>
@@ -110,8 +218,11 @@ function ForgotPasswordDialog({ defaultUsername, onClose }) {
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" onClick={onClose}
                   className="btn-secondary text-sm">Cancel</button>
-                <button type="submit" disabled={submitting}
-                  className="btn-primary text-sm flex items-center gap-2 bg-jtc hover:bg-jtc-dark">
+                <button
+                  type="submit"
+                  disabled={submitting || cooldownSec > 0}
+                  className="btn-primary text-sm flex items-center gap-2 bg-jtc hover:bg-jtc-dark disabled:opacity-60 disabled:cursor-not-allowed"
+                >
                   {submitting && <Loader2 size={14} className="animate-spin" />}
                   {submitting ? 'Submitting…' : 'Submit Request'}
                 </button>
@@ -186,25 +297,44 @@ export default function Login() {
     pointerEvents: uiRevealed ? 'auto' : 'none',
   });
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPw,   setShowPw]   = useState(false);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState('');
+  const [username,     setUsername]     = useState('');
+  const [password,     setPassword]     = useState('');
+  const [showPw,       setShowPw]       = useState(false);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState('');
   const [showForgotPw, setShowForgotPw] = useState(false);
+
+  const { isLocked, secsLeft, failCount, recordFail, recordSuccess } = useLoginRateLimit();
+
+  // How many more failures before the first tier kicks in
+  const attemptsBeforeLock = Math.max(0, RL_TIERS[0].at - failCount);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (isLocked) return;
+
     if (!username.trim() || !password) {
       setError('Please enter your username and password.');
       return;
     }
+
     setLoading(true);
+    const t0 = Date.now();
     try {
       await login(username.trim(), password);
+      recordSuccess();
       navigate('/dashboard');
     } catch (err) {
+      // Enforce minimum error latency. "Username not found" returns from the DB
+      // immediately (no hash work); "wrong password" runs bcrypt (~200-400 ms).
+      // Without this floor, an attacker can enumerate valid usernames by timing
+      // the response. Holding to LOGIN_MIN_ERROR_MS makes both paths identical.
+      const elapsed = Date.now() - t0;
+      if (elapsed < LOGIN_MIN_ERROR_MS) {
+        await new Promise(r => window.setTimeout(r, LOGIN_MIN_ERROR_MS - elapsed));
+      }
+      recordFail();
       setError(err.message || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
@@ -243,11 +373,29 @@ export default function Login() {
 
         {/* Card */}
         <div className="card p-6" style={revealStyle(1)}>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
 
-            {error && (
+            {/* Lockout banner — shown instead of the error banner when locked */}
+            {isLocked && (
+              <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3 flex items-center gap-2">
+                <ShieldAlert size={16} className="shrink-0 text-amber-500" />
+                <span>
+                  Too many failed attempts. Try again in{' '}
+                  <span className="font-semibold tabular-nums">{secsLeft}s</span>.
+                </span>
+              </div>
+            )}
+
+            {/* Login error (only while not locked) */}
+            {!isLocked && error && (
               <div className="bg-red-50 border border-red-100 text-red-600 text-sm rounded-lg px-4 py-3">
                 {error}
+                {/* Warn on the 1st and 2nd failure only — before the first lockout tier */}
+                {failCount > 0 && attemptsBeforeLock > 0 && (
+                  <span className="block mt-1 text-xs text-red-400">
+                    {attemptsBeforeLock} more failed attempt{attemptsBeforeLock !== 1 ? 's' : ''} before a temporary lockout.
+                  </span>
+                )}
               </div>
             )}
 
@@ -258,12 +406,14 @@ export default function Login() {
               </label>
               <input
                 type="text"
-                className="input focus:ring-jtc focus:border-jtc"
+                className="input focus:ring-jtc focus:border-jtc disabled:opacity-50"
                 placeholder="Enter your username"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 autoComplete="username"
                 autoFocus
+                maxLength={64}
+                disabled={loading || isLocked}
                 required
               />
             </div>
@@ -276,17 +426,20 @@ export default function Login() {
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
-                  className="input pr-10 focus:ring-jtc focus:border-jtc"
+                  className="input pr-10 focus:ring-jtc focus:border-jtc disabled:opacity-50"
                   placeholder="••••••••"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   autoComplete="current-password"
+                  maxLength={128}
+                  disabled={loading || isLocked}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPw(v => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={showPw ? 'Hide password' : 'Show password'}
                 >
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -295,11 +448,16 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={loading}
-              className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 bg-jtc hover:bg-jtc-dark"
+              disabled={loading || isLocked}
+              className="btn-primary w-full flex items-center justify-center gap-2 py-2.5 bg-jtc hover:bg-jtc-dark disabled:opacity-60 disabled:cursor-not-allowed transition-opacity"
             >
-              {loading && <Loader2 size={16} className="animate-spin" />}
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? (
+                <><Loader2 size={16} className="animate-spin" /> Signing in…</>
+              ) : isLocked ? (
+                <><ShieldAlert size={16} /> Locked ({secsLeft}s)</>
+              ) : (
+                'Sign in'
+              )}
             </button>
 
           </form>

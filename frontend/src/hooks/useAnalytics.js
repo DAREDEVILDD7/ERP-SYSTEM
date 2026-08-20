@@ -22,6 +22,9 @@ import {
   getTopCustomers,
   getMaintenanceCostTrends,
   getMonthlyKPIs,
+  getUnitPnL,
+  getForwardForecast,
+  getFleetActionQueue,
 } from '../api/analytics';
 
 const MINUTE = 60_000;
@@ -41,6 +44,9 @@ export const SECTIONS = {
   top_customers:          { fetch: getTopCustomers,            stale: 30 * MINUTE, defaultParams: { days: 365 } },
   maintenance_cost:       { fetch: getMaintenanceCostTrends,   stale: 15 * MINUTE, defaultParams: { days: 365 } },
   monthly_kpis:           { fetch: getMonthlyKPIs,             stale:  5 * MINUTE, defaultParams: {}            },
+  unit_pnl:               { fetch: getUnitPnL,                  stale: 15 * MINUTE, defaultParams: { days: 90 }  },
+  forward_forecast:       { fetch: getForwardForecast,          stale: 15 * MINUTE, defaultParams: { horizonDays: 90 } },
+  fleet_action_queue:     { fetch: getFleetActionQueue,          stale:  2 * MINUTE, defaultParams: {}            },
 };
 
 export function useAnalytics(sectionKey, params = {}) {
@@ -76,5 +82,11 @@ export function useAnalytics(sectionKey, params = {}) {
     isRefetching: query.isFetching && !query.isLoading,
     error: query.error,
     refetch,
+    // A value that changes exactly when new data lands (initial load, a date
+    // range change, a Refresh) — additive passthrough of React Query's own
+    // timestamp, used only to key chart re-entrance animations. Nothing that
+    // reads this object by its existing named fields is affected by this
+    // being present.
+    dataUpdatedAt: query.dataUpdatedAt,
   };
 }
