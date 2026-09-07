@@ -52,8 +52,12 @@ export default function MobileNav() {
 
   return (
     <>
-      {/* Bottom tab bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-100">
+      {/* Bottom tab bar — paddingBottom extends the white background under the
+          iOS home indicator (env safe area) without moving the tap targets. */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-100"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         <div className="flex items-stretch">
           {primary.map(item => (
             <NavLink

@@ -5,11 +5,15 @@
 // bubble and an assistant-message bubble; the assistant bubble renders
 // the matching analytics section from components/analytics/sections.jsx.
 //
-// The chat is stateful only within the current session — no persistence,
-// no server calls beyond the analytics queries the section components
-// already make. Every section is fail-safe (see SectionCard) so a failing
-// query, an empty result, or a template that throws only affects its own
-// bubble; the rest of the conversation is unaffected.
+// The transcript, filter, tab and ribbon-collapse state are additionally
+// persisted to localStorage (see lib/analyticsSession.js) on a sliding
+// 30-minute window scoped to the signed-in user, so leaving Analytics to
+// look at something else and coming back resumes the same conversation.
+// This is a resume point, not chat history — no server calls beyond the
+// analytics queries the section components already make. Every section is
+// fail-safe (see SectionCard) so a failing query, an empty result, or a
+// template that throws only affects its own bubble; the rest of the
+// conversation is unaffected.
 
 import { useState, useRef, useEffect, useCallback, useMemo, Component } from 'react';
 import {
@@ -31,9 +35,13 @@ import ClaudeTypingLoader, {
 import DateRangeFilter from '../../components/analytics/DateRangeFilter';
 import AnomalyRibbon from '../../components/analytics/AnomalyRibbon';
 import OverviewPanel from '../../components/analytics/OverviewPanel';
+import SignalDetail from '../../components/analytics/SignalDetail';
 import { winParams, paramsFor } from '../../lib/analyticsWindow';
 import { DEFAULT_RANGE, resolveRange } from '../../lib/dateRange';
 import { useAnalytics } from '../../hooks/useAnalytics';
+import {
+  loadAnalyticsSession, saveAnalyticsSession, clearAnalyticsSession,
+} from '../../lib/analyticsSession';
 
 // ── Prompt catalogue ─────────────────────────────────────────────────────
 // Each entry: an id (stable), a chip label, a "user says" phrasing, the
@@ -566,6 +574,42 @@ function stamp() {
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
+// A restored assistant bubble carries only `promptId` (its `renderFn` is a
+// function reference and cannot survive JSON.stringify — it is dropped by
+// design when saving, see saveTranscript below). Re-derive it from the
+// catalogue on load, same fail-safe posture as askFollowUp: if the id no
+// longer resolves (a prompt renamed or removed since the session was
+// saved) the bubble still renders its text reply, just without the chart.
+// Malformed entries (no id/role — a corrupted or foreign localStorage
+// value) are dropped rather than rendered.
+function hydrateMessages(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const cleaned = raw
+    .filter(m => m && typeof m.id === 'string' && typeof m.role === 'string')
+    .map(m => {
+      // A priority-signal bubble carries the whole anomaly rather than a
+      // promptId, because there is no catalogue entry to look up — the
+      // explanation IS the payload. It is plain data, so it round-trips
+      // through storage and the renderer can simply be rebuilt over it.
+      if (m.role === 'assistant' && m.signal) {
+        return { ...m, renderFn: () => <SignalDetail anomaly={m.signal} /> };
+      }
+      if (m.role === 'assistant' && m.promptId) {
+        return { ...m, renderFn: PROMPTS_BY_ID.get(m.promptId)?.render };
+      }
+      return m;
+    });
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+// Strips the non-serializable `renderFn` before a transcript is written to
+// storage. `JSON.stringify` would silently drop function-valued properties
+// on its own, but doing it explicitly keeps the save shape self-documenting
+// rather than depending on that behaviour.
+function serializeMessages(messages) {
+  return messages.map(({ renderFn, ...rest }) => rest);
+}
+
 // Suggested next questions, rendered under the answer they follow. Only the
 // most recent answer offers them: leaving them live on every historical
 // bubble turns the transcript into a wall of buttons and makes it ambiguous
@@ -595,15 +639,24 @@ export default function AnalyticsPage() {
   const { profile } = useAuth();
   const qc = useQueryClient();
 
-  const [range, setRange] = useState(DEFAULT_RANGE);
-  const [messages, setMessages] = useState(() => [{
+  // Loaded once, synchronously, on mount — `profile` is already populated by
+  // now (AuthContext seeds it from sessionStorage at its own construction,
+  // and this page sits behind ProtectedRoute) so there is no flash of
+  // default state before a restore applies. `null` (nothing stored, or it
+  // expired/failed to parse) falls through to the same defaults this page
+  // always had.
+  const [restoredSession] = useState(() => loadAnalyticsSession(profile?.user_id));
+
+  const [range, setRange] = useState(() => restoredSession?.range ?? DEFAULT_RANGE);
+  const [messages, setMessages] = useState(() => hydrateMessages(restoredSession?.messages) ?? [{
     id: GREETING_ID,
     role: 'assistant',
     reply: 'Hi! I can surface deterministic insights from your rentals, procurement, maintenance, revenue and fleet data. Pick a prompt below to get started — I only answer from the questions I know.',
     followUps: STARTER_FOLLOWUPS,
     timestamp: stamp(),
   }]);
-  const [activeCategory, setActiveCategory] = useState('Overview');
+  const [activeCategory, setActiveCategory] = useState(() => restoredSession?.activeCategory ?? 'Overview');
+  const [ribbonCollapsed, setRibbonCollapsed] = useState(() => restoredSession?.ribbonCollapsed ?? false);
 
 
   const scrollerRef = useRef(null);
@@ -881,8 +934,9 @@ export default function AnalyticsPage() {
 
   // Monotonic message ids. `Date.now()` alone collided when two chips were
   // clicked inside the same millisecond, and duplicate React keys make the
-  // transcript drop or reorder bubbles.
-  const seqRef = useRef(0);
+  // transcript drop or reorder bubbles. Restored from the saved session so
+  // a prompt asked after a restore never collides with a restored id.
+  const seqRef = useRef(restoredSession?.seq ?? 0);
 
   // Ref mirror of messages so callbacks (askPrompt) can read the current
   // transcript without re-creating themselves on every message push.
@@ -1005,12 +1059,94 @@ export default function AnalyticsPage() {
     askPrompt(target, suggestion.days);
   }, [askPrompt]);
 
-  // Drill-in from Overview or the Ribbon: append the prompt into the chat
-  // (which is always visible in the right column). Same signature as
-  // `askFollowUp` so chips built for either surface work without an adapter.
+  // Open a priority signal as an explanation rather than a redirect.
+  //
+  // Every anomaly carries a `promptId` naming a related section, and the old
+  // drill-in simply opened it. That was the wrong answer for most of the
+  // ribbon: eight of the fifteen rules point at `top_customers` (the four
+  // data-quality rules among them, because they are computed inside
+  // `getTopCustomers`), so clicking "2 anomalous quotes detected" asked "who
+  // are our top customers by billing?" — a question nobody had asked, and one
+  // that says nothing about the anomalous quotes.
+  //
+  // Now the click appends a real exchange: the user bubble states the signal,
+  // the assistant bubble renders `SignalDetail`, and `explain.related` becomes
+  // the follow-up chips, so the section that used to be the whole response is
+  // one click further on. The anomaly is snapshotted into the message, so the
+  // bubble keeps saying what it said when it was opened even after the
+  // underlying numbers move — the same contract `ctxSnapshot` gives sections.
+  const askSignal = useCallback((anomaly) => {
+    if (!anomaly || typeof anomaly !== 'object') return;
+    const key = anomaly.id ?? anomaly.headline;
+    if (!key) return;
+
+    // Idempotent like askPrompt: re-clicking a chip already in the transcript
+    // scrolls to it rather than stacking a duplicate. Keyed on the signal id
+    // AND the filter, so the same signal under a different date range is a
+    // genuinely new question.
+    const existing = messagesRef.current.find(m =>
+      m.role === 'assistant' &&
+      m.signalKey === key &&
+      m.ctxSnapshot?.windowDays === ctx.windowDays &&
+      m.ctxSnapshot?.from === ctx.from &&
+      m.ctxSnapshot?.to === ctx.to
+    );
+    if (existing) {
+      setScrollTargetId(existing.id.replace(/^a-/, 'u-'));
+      return;
+    }
+
+    // Only offer follow-ups that resolve against the catalogue. A renamed
+    // prompt should drop the chip, never append a bubble that does nothing.
+    const related = Array.isArray(anomaly.explain?.related)
+      ? anomaly.explain.related.filter(f => f && PROMPTS_BY_ID.has(f.promptId))
+      : [];
+    // Fall back to the rule's own promptId so a signal with no `explain`
+    // still offers the destination it always had.
+    const followUps = related.length
+      ? related
+      : (anomaly.promptId && PROMPTS_BY_ID.has(anomaly.promptId)
+        ? [{ label: 'Open the related section', promptId: anomaly.promptId, days: anomaly.days }]
+        : []);
+
+    const seq = (seqRef.current += 1);
+    const snapshot = anomaly;
+    setMessages(prev => [
+      ...prev,
+      {
+        id: `u-${seq}`,
+        role: 'user',
+        text: `Explain this signal: ${anomaly.headline ?? 'priority signal'}`,
+        timestamp: stamp(),
+      },
+      {
+        id: `a-${seq}`,
+        role: 'assistant',
+        signalKey: key,
+        // The anomaly is plain data (strings, numbers, arrays), so unlike a
+        // section's `renderFn` it survives JSON.stringify and can be replayed
+        // verbatim by hydrateMessages after a reload.
+        signal: snapshot,
+        reply: 'Here is what that signal means, how it is measured, and what sits behind the number.',
+        renderFn: () => <SignalDetail anomaly={snapshot} />,
+        ctxSnapshot: { ...ctx },
+        followUps,
+        timestamp: stamp(),
+      },
+    ]);
+  }, [ctx]);
+
+  // Drill-in from Overview or the Ribbon. A suggestion carrying `signal` is a
+  // priority-signal chip and gets the explainer; anything else is a plain
+  // prompt reference and keeps the original behaviour, so OverviewPanel and
+  // every follow-up chip are untouched by this.
   const drillIn = useCallback((suggestion) => {
+    if (suggestion?.signal) {
+      askSignal(suggestion.signal);
+      return;
+    }
     askFollowUp(suggestion);
-  }, [askFollowUp]);
+  }, [askFollowUp, askSignal]);
 
   const handleReset = useCallback(() => {
     setMessages([{
@@ -1020,7 +1156,11 @@ export default function AnalyticsPage() {
       followUps: STARTER_FOLLOWUPS,
       timestamp: stamp(),
     }]);
-  }, []);
+    // This IS the app's existing "new session" action — a persisted
+    // session is resumption of a live conversation, and there is no
+    // conversation left to resume once the user has explicitly cleared it.
+    clearAnalyticsSession(profile?.user_id);
+  }, [profile?.user_id]);
 
   const handleRefreshAll = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['analytics'] });
@@ -1041,6 +1181,40 @@ export default function AnalyticsPage() {
     ]);
   }, [ctx]);
 
+  // ── Session persistence ────────────────────────────────────────────────
+  // Three independent, cheap saves — each fires only when the piece of
+  // state it covers actually changes (asking a prompt, resetting,
+  // switching the date filter or the category tab). None of this is
+  // debounced: these are discrete user actions, not a high-frequency
+  // stream like scroll or drag, so there is nothing to coalesce. Together
+  // they also refresh `lastActivityAt` on every meaningful interaction,
+  // which is what implements the sliding 30-minute expiration.
+  //
+  // Restoring the transcript at mount is enough to restore scroll position
+  // too — the reading-anchor effect above already fires on first render
+  // and, given a restored multi-message transcript, anchors to the newest
+  // question exactly as it would for a freshly-asked one. No separate
+  // scrollTop save/restore is needed, and adding one would risk fighting
+  // the anchor loop for control of the same scrollTop.
+  useEffect(() => {
+    saveAnalyticsSession(profile?.user_id, {
+      messages: serializeMessages(messages),
+      seq: seqRef.current,
+    });
+  }, [messages, profile?.user_id]);
+
+  useEffect(() => {
+    saveAnalyticsSession(profile?.user_id, { range });
+  }, [range, profile?.user_id]);
+
+  useEffect(() => {
+    saveAnalyticsSession(profile?.user_id, { activeCategory });
+  }, [activeCategory, profile?.user_id]);
+
+  useEffect(() => {
+    saveAnalyticsSession(profile?.user_id, { ribbonCollapsed });
+  }, [ribbonCollapsed, profile?.user_id]);
+
   // Which bubble is the start of the newest exchange — the question the
   // freshest answer belongs to. Anchoring on the QUESTION rather than on the
   // answer is what puts the reader at the top of the whole exchange.
@@ -1057,7 +1231,7 @@ export default function AnalyticsPage() {
   );
 
   return (
-    <div className="flex flex-col h-full min-h-[600px] gap-2 min-w-0 max-w-full">
+    <div className="flex flex-col min-h-[600px] lg:h-full gap-2 min-w-0 max-w-full">
       {/* Keyframes for message entry — kept inline so the page ships as one
           drop-in file with no global CSS additions. */}
       <style>{`
@@ -1129,7 +1303,12 @@ export default function AnalyticsPage() {
 
       {/* ── Priority signals — full width above both columns ─────────── */}
       {!enteringWorkspace && (
-        <AnomalyRibbon ctx={ctx} onDrillIn={drillIn} />
+        <AnomalyRibbon
+          ctx={ctx}
+          onDrillIn={drillIn}
+          collapsed={ribbonCollapsed}
+          onToggleCollapsed={setRibbonCollapsed}
+        />
       )}
 
       {/* ── Two-column body ───────────────────────────────────────────────
@@ -1159,7 +1338,7 @@ export default function AnalyticsPage() {
           <>
           <div
             ref={scrollerRef}
-            className="flex-1 overflow-x-hidden overflow-y-auto px-3 md:px-6 py-4 md:py-5 pb-8 md:pb-10 space-y-4 md:space-y-5 bg-gradient-to-b from-slate-50/50 to-white"
+            className="flex-1 overflow-x-hidden overflow-y-auto px-3 md:px-6 py-4 md:py-5 pb-10 md:pb-10 space-y-4 md:space-y-5 bg-gradient-to-b from-slate-50/50 to-white"
           >
             {messages.map((m, idx) => (
               m.role === 'system' ? (
@@ -1213,9 +1392,11 @@ export default function AnalyticsPage() {
           </div>
 
           {/* ── Prompt picker ─────────────────────────────────────────── */}
-          <div className="border-t border-slate-100 bg-white/80 backdrop-blur px-3 md:px-5 py-3 space-y-2 shrink-0">
-            {/* Category tabs */}
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
+          <div className="border-t border-slate-100 bg-white/80 backdrop-blur px-3 md:px-5 py-3 space-y-2 shrink-0 overflow-hidden">
+            {/* Category tabs — horizontally scrollable on mobile. overscroll-x-contain
+                prevents the swipe from leaking to the parent. tabs-scroll hides the
+                thin scrollbar without disabling the gesture. */}
+            <div className="tabs-scroll flex items-center gap-1 overflow-x-auto pb-1 overscroll-x-contain min-w-0">
               {CATEGORIES.map(cat => (
                 <button
                   key={cat}

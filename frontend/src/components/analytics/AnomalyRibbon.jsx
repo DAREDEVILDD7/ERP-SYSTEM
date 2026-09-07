@@ -18,9 +18,13 @@
 //    page keeps working.
 //
 // The click contract: if `onDrillIn` is passed, each chip becomes a
-// button that calls `onDrillIn({ promptId })`. The parent decides what to
-// do (Phase 4 wires this into `askFollowUp`); without it, chips render as
-// static badges.
+// button that calls `onDrillIn({ signal })` with the WHOLE anomaly, not
+// just its promptId. The parent renders an explanation of that signal —
+// what it detects, why it fired, the rows behind it — and offers the
+// related sections as follow-ups. Passing the promptId alone was the old
+// contract and it produced the wrong answer: eight of the fifteen rules
+// name `top_customers`, so clicking a quote-anomaly chip asked who the top
+// customers were. Without `onDrillIn`, chips render as static badges.
 
 import { Component, useMemo, useState } from 'react';
 import {
@@ -131,7 +135,11 @@ function Skeleton() {
 function Chip({ anomaly, onDrillIn }) {
   const sev = SEV_STYLE[anomaly.severity] ?? SEV_STYLE.info;
   const Icon = ICONS[anomaly.icon] ?? AlertTriangle;
-  const clickable = typeof onDrillIn === 'function' && anomaly.promptId;
+  // Clickable whenever there is a handler. It used to also require a
+  // promptId, because the click's only job was to open that section. Now the
+  // click opens an explanation of THIS signal, which every anomaly can give
+  // from its own headline and detail even if it names no related section.
+  const clickable = typeof onDrillIn === 'function';
 
   // Two-line compact layout: severity + headline on line 1, detail on line 2.
   // Left colour rail (sev.dot) replaces the old icon-box so the severity reads
@@ -166,16 +174,20 @@ function Chip({ anomaly, onDrillIn }) {
   return (
     <button
       type="button"
-      onClick={() => onDrillIn({ promptId: anomaly.promptId, days: anomaly.days })}
+      onClick={() => onDrillIn({ signal: anomaly })}
       className={`${wrapBase} text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md hover:z-10 focus:outline-none focus-visible:ring-2 ${sev.ring}`}
-      title={`Open ${anomaly.promptId.replace(/_/g, ' ')}`}
+      title={`${anomaly.headline}
+
+${anomaly.detail ?? ''}
+
+Click to see what this signal means.`}
     >
       {rail}{content}
     </button>
   );
 }
 
-function RibbonInner({ ctx, onDrillIn }) {
+function RibbonInner({ ctx, onDrillIn, collapsed: collapsedProp, onToggleCollapsed }) {
   // Reuse the same fetchers the sections themselves use, RESOLVED WITH
   // THE SAME PARAMS. `paramsFor(sectionKey, ctx)` looks up the same
   // per-section clamps AnalyticsPage applies to its chat renders, so the
@@ -197,11 +209,18 @@ function RibbonInner({ ctx, onDrillIn }) {
 
   // Collapsed by default only after the user has expanded once and
   // opted to hide — first mount stays expanded so the ribbon is
-  // visible on landing. State is ephemeral (page-scope), because a
-  // persisted setting is not what was asked for and adds a moving
-  // part. Every fetch continues in the background so re-expanding is
-  // instant.
-  const [collapsed, setCollapsed] = useState(false);
+  // visible on landing. Every fetch continues in the background so
+  // re-expanding is instant.
+  //
+  // `collapsed`/`onToggleCollapsed` are optional controlled props —
+  // AnalyticsPage passes them so this state survives a leave-and-return
+  // via the page's session persistence. Falls back to plain internal
+  // state when omitted, so nothing else that might render this ribbon
+  // is required to know about that.
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const isControlled = typeof collapsedProp === 'boolean';
+  const collapsed = isControlled ? collapsedProp : internalCollapsed;
+  const setCollapsed = isControlled ? onToggleCollapsed : setInternalCollapsed;
 
   // Clicking a signal chip drills into the matching section (via the
   // parent's onDrillIn) AND rolls the ribbon up, so the freshly-appended
@@ -215,7 +234,7 @@ function RibbonInner({ ctx, onDrillIn }) {
       catch (err) { console.warn('[AnomalyRibbon] drill-in threw', err?.message ?? err); }
       setCollapsed(true);
     };
-  }, [onDrillIn]);
+  }, [onDrillIn, setCollapsed]);
 
   const allLoading =
     monthly.isLoading && leases.isLoading && customers.isLoading &&
@@ -327,10 +346,15 @@ function RibbonInner({ ctx, onDrillIn }) {
   );
 }
 
-export default function AnomalyRibbon({ ctx, onDrillIn }) {
+export default function AnomalyRibbon({ ctx, onDrillIn, collapsed, onToggleCollapsed }) {
   return (
     <RibbonBoundary>
-      <RibbonInner ctx={ctx} onDrillIn={onDrillIn} />
+      <RibbonInner
+        ctx={ctx}
+        onDrillIn={onDrillIn}
+        collapsed={collapsed}
+        onToggleCollapsed={onToggleCollapsed}
+      />
     </RibbonBoundary>
   );
 }

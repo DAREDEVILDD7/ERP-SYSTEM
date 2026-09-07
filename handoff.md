@@ -34,6 +34,82 @@ analytics-assistant workstream.
 
 ## Recently completed (latest local commit `87a6a7e`, not yet pushed)
 
+- **Fixed two caveats in the Priority Signals data-quality path
+  (uncommitted).** (1) A newly created quotation could reach page 1001+
+  of `getTopCustomers`'s 365-day window and be silently invisible to the
+  ribbon: PostgREST caps an unbounded select at 1000 rows with no error —
+  measured directly against the live database — and `quotations` was
+  within 20 rows of that cliff; `quotation_items` had already crossed it.
+  Fixed with `safeQueryAll` / `PK_COLUMN` in `api/analytics.js`, applied to
+  `windowedRows` (covers `invoices`/`quotations`/`lease_invoices`) and to
+  every raw `quotation_items` query that could plausibly cross 1000 rows
+  (`getMostRentedEquipment`, `getMaintenanceFrequency`,
+  `getRevenueByCategory` ×2, `getUnitPnL`). (2) `top_customers` had a
+  30-minute stale time with no realtime subscription, so a quote created
+  live during a demo would not reach the ribbon for up to half an hour;
+  `quotations` was already in the Supabase realtime publication, so
+  `top_customers` now carries `realtime: ['quotations']`
+  (`hooks/useAnalytics.js`), mirroring the existing `idle_vs_active`
+  pattern. New `scripts/verify_row_pagination.mjs` (16 assertions) proves
+  both against a fake Supabase client holding >1000 rows with the
+  triggering rows placed deliberately in the truncated tail.
+
+- **Analytics: a Priority Signal chip now explains itself (uncommitted).**
+  Clicking a chip used to open the section named by the rule's `promptId`,
+  and eight of the fifteen rules name `top_customers` — so clicking
+  "2 anomalous quotes detected" asked "who are our top customers by
+  billing?". Every rule in `lib/anomalyRules.js` now carries an `explain`
+  block (what it detects, why it fired, how it is measured, the rows
+  responsible, what to do, related sections), rendered into the chat by the
+  new `components/analytics/SignalDetail.jsx`. The related section survives
+  as a follow-up chip. Evidence rows for the four data-quality rules come
+  from `breakdowns.dataQualityFlags`, which `getTopCustomers` already ships,
+  so no new query was added. Verified by `scripts/verify_signal_detail.cjs`
+  (79 jsdom checks) and a new section in `verify_analytics_signals.mjs`
+  (now 218 assertions, was 56).
+
+- **The POC seed's lease UPDATEs did not reach the database.** All five
+  insert blocks landed (626/867/867/403/331 confirmed against live
+  Supabase) but `equipment_units` carried zero seeded leases, so the
+  Forward forecast read KWD 0 on all three horizons with no error anywhere.
+  The lease block is the last thing in the file, after the inserts. Added
+  `frontend/seed_poc_leases_2026.sql` (standalone, re-runnable) and a
+  verification `SELECT` at the end of the generated seed so a short paste
+  cannot fail silently again.
+
+- **Analytics: Priority Signals + Forward forecast (uncommitted, for the
+  Sunday POC).** The forecasting and anomaly-detection work for the POC
+  lives on the **Analytics page**, not the dashboard. Four record-level
+  data-quality rules added to `lib/anomalyRules.js` (KWD 0, missing,
+  negative, duplicate/oversized), fed by `screenQuotations()` run inside
+  `getTopCustomers` over quotations it already fetches — no new query.
+  `getForwardForecast` was already correct but had no data: only 3 units
+  held leases and all ended Aug 2026, so every horizon read KWD 0. The
+  seed adds 24 lease commitments to `equipment_units`, producing
+  30d 44,619 / 60d 76,959 / 90d 101,458 KWD with a deliberate renewal
+  cliff. Verified by `scripts/verify_analytics_signals.mjs` (56
+  assertions).
+
+- **Operational Dashboard (uncommitted, additive — NOT part of the
+  original POC ask).** Built before the scope was clarified; the ask was
+  only for the tab *swap*. It works and is tested, but can be reverted to
+  the plain `AdminDashboard` by changing one line in `DashboardRouter.jsx`
+  if it is not wanted. New Super Admin landing view
+  showing Quotes → Orders → Dispatch → Delivery → Returns as daily
+  series, a 30/60/90-day forecast drawn past the last actual day, and
+  record-level anomalies (KWD 0 quotes first). Tab order in
+  `pages/DashboardRouter.jsx` is now Operational, then System, with
+  Operational as the default; System Dashboard and every other role's
+  routing are unchanged. New files: `src/components/dashboard/
+  OperationalDashboard.jsx`, `src/api/operations.js`,
+  `src/lib/forecast.js`, `src/lib/operationalAnomalies.js`,
+  `scripts/pocDataset.js`, `scripts/generate_poc_seed.js`,
+  `scripts/verify_operational_model.mjs`,
+  `seed_poc_operations_2026.sql`, `docs/operational-dashboard.md`.
+  **The seed has NOT been applied to Supabase** — run
+  `frontend/seed_poc_operations_2026.sql` in the SQL editor before the
+  demo. Detail and rationale: `docs/operational-dashboard.md`.
+
 - **Doc restructure (`87a6a7e`).** Split the load-bearing reference
   out of the giant `CLAUDE.md` / `handoff.md` pair into
   `docs/architecture.md`, `docs/authorization.md`,
@@ -208,12 +284,29 @@ loading tree, and the SQL migration files listed in `docs/`.
 Uncommitted working-tree changes (see "Currently being worked on"):
 `frontend/src/api/analytics.js`, `sections.jsx`, `insightTemplates.js`,
 `AnalyticsPage.jsx`, `rolePermissions.js`, `frontend/.gitignore`.
+Also uncommitted, from the Operational Dashboard work:
+`frontend/src/pages/DashboardRouter.jsx`, `CLAUDE.md`, plus the new
+files listed under "Recently completed".
 Untracked new files: `AnalysisBrief.jsx`, `DateRangeFilter.jsx`,
 `analyticsLabels.js`, `dateRange.js`, `insightBrief.js`,
 `scripts/claude-mascot-src.svg`.
+From the priority-signal explainer work, also uncommitted:
+`frontend/src/lib/anomalyRules.js`, `components/analytics/AnomalyRibbon.jsx`,
+`pages/analytics/AnalyticsPage.jsx`, `docs/operational-dashboard.md`,
+`CLAUDE.md`. New: `components/analytics/SignalDetail.jsx`,
+`scripts/verify_signal_detail.cjs`, `frontend/seed_poc_leases_2026.sql`.
+From the row-pagination fix, also uncommitted:
+`frontend/src/api/analytics.js` (`safeQueryAll`, `PK_COLUMN`,
+`windowedRows` rewritten, five `quotation_items` call sites converted),
+`frontend/src/hooks/useAnalytics.js` (`top_customers` realtime). New:
+`frontend/scripts/verify_row_pagination.mjs`, `docs/analytics.md`.
 
 ## Next steps
 
+- **Apply `frontend/seed_poc_operations_2026.sql`** in the Supabase SQL
+  editor before the POC. Until it runs: the live data ends 2026-08-19,
+  the Forward forecast reads KWD 0 on all three horizons, and no
+  data-quality Priority Signals fire.
 - **Push `87a6a7e`** to origin/master when ready (doc restructure commit).
 - Decide the scope for the uncommitted analytics iteration (which
   slices ship, which are still incubating) before committing.

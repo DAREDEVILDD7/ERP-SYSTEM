@@ -17,7 +17,7 @@ import {
   ArrowLeft, Loader2, AlertOctagon, Clock, RotateCcw,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { Fragment, useState, useMemo, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAnalytics } from '../../hooks/useAnalytics';
 import {
@@ -657,6 +657,16 @@ function summarizeDailyRange(rows) {
   };
 }
 
+// English plurals are too irregular to derive from the singular alone
+// ("dispatch" → "dispatches", not "dispatchs") — every call site states
+// both forms explicitly rather than this function guessing at a suffix.
+// `plural` defaults to `${singular}s`, which covers the regular case
+// ("rental" → "rentals", "return" → "returns") so a caller only needs to
+// pass it when that default would be wrong.
+function pluralize(n, singular, plural) {
+  return Math.abs(Number(n) || 0) === 1 ? singular : (plural ?? `${singular}s`);
+}
+
 // Same purpose as `summarizeDailyRange` above, for Return Trends' weekly
 // series: `{week, count, avgTurnaroundDays}`. Turnaround is averaged
 // weighted by each week's own return count, so a week with one slow return
@@ -683,6 +693,58 @@ function summarizeWeeklyRange(rows) {
     peakWeek: peak?.week ?? null,
     peakCount: peak ? (Number(peak.count) || 0) : 0,
     avgTurnaroundDays: turnaroundWeight ? Math.round((turnaroundWeightedSum / turnaroundWeight) * 10) / 10 : null,
+  };
+}
+
+// Same purpose, for `TrendCompare`'s `{bucket, current, previous}` series —
+// shared by every "vs previous period" chart (rental, dispatch, returns,
+// revenue). Totals over whatever range is CURRENTLY visible, so zooming in
+// reports the sum for exactly the dragged sub-range rather than the whole
+// window's total repeated unchanged.
+function summarizeCompareRange(rows) {
+  if (!rows?.length) return null;
+  let curTotal = 0;
+  let prevTotal = 0;
+  for (const r of rows) {
+    curTotal += Number(r?.current) || 0;
+    prevTotal += Number(r?.previous) || 0;
+  }
+  return {
+    buckets: rows.length,
+    curTotal,
+    prevTotal,
+    deltaPct: prevTotal > 0 ? Math.round(((curTotal - prevTotal) / prevTotal) * 100) : null,
+  };
+}
+
+// Same purpose, for Maintenance Cost Trends' `series.byMonth`: every row
+// already carries a dynamic per-issue-type cost key alongside `total` (the
+// fetcher builds `total` by summing them), which nothing rendered until now.
+function summarizeMonthlyCostRange(rows) {
+  if (!rows?.length) return null;
+  let total = 0;
+  let peak = null;
+  const byIssue = new Map();
+  const skip = new Set(['month', 'total', 'jobs', 'avgCost', 'trailing3']);
+  for (const r of rows) {
+    const t = Number(r?.total) || 0;
+    total += t;
+    if (!peak || t > (Number(peak.total) || 0)) peak = r;
+    for (const k of Object.keys(r ?? {})) {
+      if (skip.has(k)) continue;
+      const v = Number(r[k]) || 0;
+      if (v > 0) byIssue.set(k, (byIssue.get(k) ?? 0) + v);
+    }
+  }
+  return {
+    months: rows.length,
+    total,
+    avgPerMonth: rows.length ? total / rows.length : 0,
+    peakMonth: peak?.month ?? null,
+    peakTotal: peak ? (Number(peak.total) || 0) : 0,
+    // Highest cost first — an issue type with zero cost in this slice was
+    // already dropped above, so every entry here is worth showing.
+    issueBreakdown: [...byIssue.entries()].sort((a, b) => b[1] - a[1]),
   };
 }
 
@@ -726,6 +788,21 @@ function SortToggle({ options, value, onChange }) {
 function TrendCompare({
   data, title = 'This period vs the previous one', height = 150,
   format = (v) => v, currentLabel = 'This period', prevLabel = 'Previous period',
+  // The plural-safe noun for what `current`/`previous` actually count — e.g.
+  // "rental" for Most Rented Equipment, "dispatch" for Dispatch Trends,
+  // "return" for Return Trends. This is what the leading summary figure used
+  // to show as a bare, meaningless "N points" — the metric this chart
+  // measures lives in the SECTION that calls this component (only it knows
+  // whether it's counting rentals or dispatches), so it is declared here as
+  // an explicit prop rather than guessed inside the shared component.
+  //
+  // Omit it for a MONEY metric (Revenue): its `format` is already `kwd`,
+  // which embeds its own unit ("KWD 8,000") — appending a noun on top would
+  // read as "KWD 8,000 revenue", which is redundant. A caller with neither a
+  // noun nor a unit-bearing formatter just shows the bare total, which is
+  // never factually wrong, only less descriptive — the graceful fallback for
+  // a chart with no declared metric, short of inventing one.
+  metricSingular, metricPlural,
   // The card's own period picker — a different fetched window snaps an
   // active zoom back to full, same as every other zoomable chart. Optional:
   // a caller that never changes its window (none currently do) can omit it.
@@ -736,6 +813,12 @@ function TrendCompare({
   // formatted day string ("5 Aug"), not lexicographically sortable, so this
   // resolves drag positions by array INDEX rather than by comparing labels.
   const zoom = useIndexZoom(data, 'bucket', resetKey);
+  // Totals for whatever range is CURRENTLY visible — the full series, or the
+  // zoomed-to sub-range — from data already in memory. `comparativeSeries`
+  // now buckets at near-daily resolution instead of a flat 8 (see its own
+  // comment), which is what makes this summary say something different once
+  // zoomed rather than just repeating the same handful of blended points.
+  const rangeSummary = useMemo(() => summarizeCompareRange(zoom.data), [zoom.data]);
 
   if (!data?.length) return null;
   // With no baseline at all the dashed line is a flat zero, which reads as a
@@ -758,6 +841,21 @@ function TrendCompare({
         fromDate={zoom.zoomDomain?.from}
         toDate={zoom.zoomDomain?.to}
         onReset={zoom.resetZoom}
+        detail={rangeSummary && (
+          <p>
+            {format(rangeSummary.curTotal + rangeSummary.prevTotal)}
+            {metricSingular && ` ${pluralize(rangeSummary.curTotal + rangeSummary.prevTotal, metricSingular, metricPlural)}`}
+            {' · '}{format(rangeSummary.curTotal)} {currentLabel.toLowerCase()}
+            {hasPrev && (
+              <>
+                {' · '}{format(rangeSummary.prevTotal)} {prevLabel.toLowerCase()}
+                {rangeSummary.deltaPct !== null && (
+                  <> · {rangeSummary.deltaPct >= 0 ? '+' : ''}{rangeSummary.deltaPct}%</>
+                )}
+              </>
+            )}
+          </p>
+        )}
       />
       <ChartAnim animKey={zoom.animKey} variant="draw" className="select-none" style={{ height, touchAction: 'none' }}>
         <ResponsiveContainer>
@@ -765,9 +863,29 @@ function TrendCompare({
             <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" />
             <XAxis dataKey="bucket" tick={{ fontSize: 9 }} minTickGap={12} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 9 }} width={44} tickFormatter={(v) => format(v)} axisLine={false} tickLine={false} />
+            {/* Named rows (not the plain default formatter) so a hovered
+                point states BOTH figures and the delta between them, rather
+                than two bare numbers the reader has to subtract themselves. */}
             <Tooltip
-              contentStyle={NEO_TOOLTIP_STYLE}
-              formatter={(v, name) => [format(v), name]}
+              content={
+                <NamedTooltip
+                  titleOf={(r) => r.bucket}
+                  rows={(r) => {
+                    const out = [{ label: currentLabel, value: format(r.current) }];
+                    if (hasPrev) {
+                      const prev = Number(r.previous) || 0;
+                      const cur = Number(r.current) || 0;
+                      const d = prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
+                      out.push({ label: prevLabel, value: format(r.previous) });
+                      out.push({
+                        label: 'vs previous',
+                        value: d === null ? (cur > 0 ? 'new' : '—') : `${d >= 0 ? '+' : ''}${d}%`,
+                      });
+                    }
+                    return out;
+                  }}
+                />
+              }
             />
             <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10 }} />
             {hasPrev && (
@@ -1224,6 +1342,7 @@ export function MostRentedSection({ params }) {
           <TrendCompare
             data={d.series?.compare}
             title={`Rental volume vs the previous ${d.meta?.windowDays ?? 30} days`}
+            metricSingular="rental"
             resetKey={cardRange}
           />
 
@@ -1313,41 +1432,53 @@ export function MostRentedSection({ params }) {
                 <span className="text-slate-400 font-normal"> — click a unit for its rental history</span>
               </p>
               <ul className="space-y-1.5">
-                {d.breakdowns.byUnit.slice(0, 6).map((u) => (
-                  <li key={u.equipment_id}>
-                    <button
-                      type="button"
-                      onClick={() => setDrillUnit({ equipment_id: u.equipment_id, label: u.label })}
-                      className="w-full text-left neo-inset px-3 py-2 hover:bg-white/60 transition-colors rounded-xl group flex items-center justify-between gap-3"
+                {d.breakdowns.byUnit.slice(0, 6).map((u) => {
+                  const isExpanded = drillUnit?.equipment_id === u.equipment_id;
+                  return (
+                    <li
+                      key={u.equipment_id}
                     >
-                      <div className="min-w-0" title={u.equipment_id}>
-                        <p className="text-[11px] font-semibold text-slate-800 truncate">{u.label}</p>
-                        <p className="text-[10px] text-slate-400 truncate">
-                          {u.type_name}{u.location ? ` · ${u.location}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs font-semibold text-slate-800">
-                          {u.rentals} rental{u.rentals === 1 ? '' : 's'}
-                        </span>
-                        <ChevronRight size={14} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
-                      </div>
-                    </button>
-                  </li>
-                ))}
+                      <button
+                        type="button"
+                        aria-expanded={isExpanded}
+                        onClick={() => setDrillUnit(isExpanded ? null : { equipment_id: u.equipment_id, label: u.label })}
+                        className="w-full text-left neo-inset px-3 py-2 hover:bg-white/60 transition-colors rounded-xl group flex items-center justify-between gap-3 focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-primary-500/40"
+                      >
+                        <div className="min-w-0" title={u.equipment_id}>
+                          <p className="text-[11px] font-semibold text-slate-800 truncate">{u.label}</p>
+                          <p className="text-[10px] text-slate-400 truncate">
+                            {u.type_name}{u.location ? ` · ${u.location}` : ''}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-xs font-semibold text-slate-800">
+                            {u.rentals} rental{u.rentals === 1 ? '' : 's'}
+                          </span>
+                          <ChevronRight
+                            size={14}
+                            className={clsx(
+                              'transition-transform transition-colors',
+                              isExpanded
+                                ? 'rotate-90 text-primary-400'
+                                : 'text-slate-400 group-hover:text-slate-600',
+                            )}
+                          />
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="mt-1.5 min-w-0">
+                          <RentalRecordsPanel
+                            params={effectiveParams}
+                            equipmentId={u.equipment_id}
+                            unitLabelText={u.label}
+                            onClose={() => setDrillUnit(null)}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
-              {/* Expands in place, directly under the unit that was clicked,
-                  so the ranking it came from stays on screen. */}
-              {drillUnit && (
-                <div className="mt-2">
-                  <RentalRecordsPanel
-                    params={effectiveParams}
-                    equipmentId={drillUnit.equipment_id}
-                    unitLabelText={drillUnit.label}
-                    onClose={() => setDrillUnit(null)}
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -1416,6 +1547,15 @@ export function MostProcuredSection({ params }) {
       { key: 'Lease', label: 'Lease', value: t.Lease, raw: t.Lease, color: '#3b82f6' },
       { key: 'Other', label: 'Other', value: t.Other, raw: t.Other, color: '#94a3b8' },
     ];
+  }, [monthlyZoom.data]);
+  // `spend` was already computed per month (from `total_amount_kwd`, already
+  // fetched for the KPI totals) but never surfaced by this chart — summing
+  // it over whatever range is currently visible reads it for the first time.
+  const monthMixRangeSummary = useMemo(() => {
+    const rows = monthlyZoom.data ?? [];
+    if (!rows.length) return null;
+    const spend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0);
+    return { months: rows.length, spend };
   }, [monthlyZoom.data]);
 
   return (
@@ -1609,6 +1749,12 @@ export function MostProcuredSection({ params }) {
                 fromDate={monthLabel(monthlyZoom.zoomDomain?.from)}
                 toDate={monthLabel(monthlyZoom.zoomDomain?.to)}
                 onReset={monthlyZoom.resetZoom}
+                detail={monthMixRangeSummary && (
+                  <p>
+                    {monthMixRangeSummary.months} month{monthMixRangeSummary.months === 1 ? '' : 's'}
+                    {' · '}{kwd(monthMixRangeSummary.spend)} total spend
+                  </p>
+                )}
               />
               <BarLegendChips items={monthMixChips} offsetLeft={72} activeKey={mixHover.activeKey} onHover={mixHover.onHover} />
               <ChartAnim
@@ -1622,7 +1768,22 @@ export function MostProcuredSection({ params }) {
                     <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" />
                     <XAxis dataKey="month" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10 }} allowDecimals={false} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={NEO_TOOLTIP_STYLE} cursor={false} />
+                    {/* `spend` was already computed per month — surfacing it
+                        here is free, no new data. */}
+                    <Tooltip
+                      cursor={false}
+                      content={
+                        <NamedTooltip
+                          titleOf={(r) => monthLabel(r.month)}
+                          rows={(r) => [
+                            { label: 'Buy', value: r.Buy },
+                            { label: 'Lease', value: r.Lease },
+                            { label: 'Other', value: r.Other },
+                            { label: 'Total spend', value: kwd(r.spend) },
+                          ]}
+                        />
+                      }
+                    />
                     <Bar dataKey="Buy"   stackId="a" fill="#EE1C25" shape={Bar3D} isAnimationActive={false} {...mixHover.barProps('Buy')} />
                     <Bar dataKey="Lease" stackId="a" fill="#3b82f6" shape={Bar3D} isAnimationActive={false} {...mixHover.barProps('Lease')} />
                     <Bar dataKey="Other" stackId="a" fill="#94a3b8" shape={Bar3D} isAnimationActive={false} {...mixHover.barProps('Other')} />
@@ -2052,6 +2213,8 @@ export function DispatchTrendsSection({ params }) {
           <TrendCompare
             data={d.series?.compare}
             title={`Dispatch volume vs the previous ${d.meta?.windowDays ?? 90} days`}
+            metricSingular="dispatch"
+            metricPlural="dispatches"
             resetKey={cardRange}
           />
 
@@ -2232,6 +2395,7 @@ export function ReturnTrendsSection({ params }) {
           <TrendCompare
             data={d.series?.compare}
             title={`Returns vs the previous ${d.meta?.windowDays ?? 90} days`}
+            metricSingular="return"
             resetKey={cardRange}
           />
 
@@ -2664,6 +2828,21 @@ export function ProcurementVsLeaseSection({ params }) {
       { key: 'Lease', label: 'Lease', value: lease, raw: lease, color: '#3b82f6' },
     ];
   }, [monthlyZoom.data]);
+  // Each `monthly` row already carries `buySpend`/`leaseMonthly` alongside
+  // the Buy/Lease counts — unused by this chart until now. Summarising
+  // whatever range is currently visible reads them for the first time,
+  // without any new query.
+  const monthMixRangeSummary = useMemo(() => {
+    const rows = monthlyZoom.data ?? [];
+    if (!rows.length) return null;
+    let buySpend = 0;
+    let leaseMonthly = 0;
+    for (const r of rows) {
+      buySpend += Number(r?.buySpend) || 0;
+      leaseMonthly += Number(r?.leaseMonthly) || 0;
+    }
+    return { months: rows.length, buySpend, leaseMonthly };
+  }, [monthlyZoom.data]);
 
   return (
     <SectionCard
@@ -2792,6 +2971,13 @@ export function ProcurementVsLeaseSection({ params }) {
                 fromDate={monthLabel(monthlyZoom.zoomDomain?.from)}
                 toDate={monthLabel(monthlyZoom.zoomDomain?.to)}
                 onReset={monthlyZoom.resetZoom}
+                detail={monthMixRangeSummary && (
+                  <p>
+                    {monthMixRangeSummary.months} month{monthMixRangeSummary.months === 1 ? '' : 's'}
+                    {' · '}{kwd(monthMixRangeSummary.buySpend)} buy spend
+                    {' · '}{kwd(monthMixRangeSummary.leaseMonthly)}/mo lease commit
+                  </p>
+                )}
               />
               <BarLegendChips items={monthMixChips} offsetLeft={72} activeKey={mixHover.activeKey} onHover={mixHover.onHover} />
               <ChartAnim
@@ -2805,7 +2991,21 @@ export function ProcurementVsLeaseSection({ params }) {
                     <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" />
                     <XAxis dataKey="month" tick={{ fontSize: 10 }} minTickGap={8} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10 }} allowDecimals={false} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={NEO_TOOLTIP_STYLE} cursor={false} />
+                    {/* Count AND spend for each side — `buySpend`/
+                        `leaseMonthly` were already computed per month, just
+                        never shown. */}
+                    <Tooltip
+                      cursor={false}
+                      content={
+                        <NamedTooltip
+                          titleOf={(r) => monthLabel(r.month)}
+                          rows={(r) => [
+                            { label: 'Buy', value: `${r.Buy} · ${kwd(r.buySpend)}` },
+                            { label: 'Lease', value: `${r.Lease} · ${kwd(r.leaseMonthly)}/mo` },
+                          ]}
+                        />
+                      }
+                    />
                     <Bar dataKey="Buy"   stackId="m" fill="#EE1C25" shape={Bar3D} isAnimationActive={false} {...mixHover.barProps('Buy')} />
                     <Bar dataKey="Lease" stackId="m" fill="#3b82f6" shape={Bar3D} isAnimationActive={false} {...mixHover.barProps('Lease')} />
                     {(monthlyZoom.zoomDrag.drag || monthlyZoom.highlightRange) && (
@@ -3163,62 +3363,86 @@ export function TopCustomersSection({ params }) {
                 </tr>
               </thead>
               <tbody className="divide-y neo-divider">
-                {d.breakdowns.top20.slice(0, 8).map(c => (
-                  <tr
-                    key={c.customer_id}
-                    title={`Customer ID ${c.customer_id}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDrillCustomer(c)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') setDrillCustomer(c); }}
-                    className="cursor-pointer hover:bg-slate-50/70 transition-colors"
-                  >
-                    <td className="py-2 truncate max-w-[200px]">
-                      <span>{c.company_name ?? '—'}</span>
-                      {c.is_churned && (
-                        <span className="ml-1.5 inline-block text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full align-middle">
-                          dormant
-                        </span>
+                {d.breakdowns.top20.slice(0, 8).map(c => {
+                  const isOpen = drillCustomer?.customer_id === c.customer_id;
+                  // Toggles: clicking the already-open row collapses it (the
+                  // same "Back" action, from the row itself); clicking a
+                  // DIFFERENT row switches straight to it without needing a
+                  // close-then-reopen step.
+                  const toggle = () => setDrillCustomer(prev => (
+                    prev?.customer_id === c.customer_id ? null : c
+                  ));
+                  return (
+                    <Fragment key={c.customer_id}>
+                      <tr
+                        title={`Customer ID ${c.customer_id}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={isOpen}
+                        onClick={toggle}
+                        onKeyDown={(e) => { if (e.key === 'Enter') toggle(); }}
+                        className={clsx(
+                          'cursor-pointer transition-colors',
+                          isOpen ? 'bg-primary-50/70' : 'hover:bg-slate-50/70',
+                        )}
+                      >
+                        <td className="py-2 truncate max-w-[200px]">
+                          <span className={isOpen ? 'font-semibold text-primary-700' : undefined}>
+                            {c.company_name ?? '—'}
+                          </span>
+                          {c.is_churned && (
+                            <span className="ml-1.5 inline-block text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full align-middle">
+                              dormant
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 text-right">{c.approved_quotes}</td>
+                        <td className="py-2 text-right">{kwd(c.billed_kwd)}</td>
+                        <td className="py-2 text-right whitespace-nowrap">
+                          <Delta
+                            value={c.trendPct}
+                            current={c.billed_kwd}
+                            compareTitle={compareLabel(d.meta)}
+                          />
+                        </td>
+                        <td className="py-2 text-right">
+                          {c.collectedPct == null ? '—' : `${c.collectedPct}%`}
+                        </td>
+                        <td
+                          className={`py-2 text-right ${c.outstanding > 0 ? 'text-primary-600 font-semibold' : ''}`}
+                          title={c.max_days_late > 0 ? `Oldest unpaid invoice ${c.max_days_late}d past due` : undefined}
+                        >
+                          {kwd(c.outstanding)}
+                          {c.max_days_late > 0 && (
+                            <span className="block text-[9px] text-rose-500 font-normal leading-tight">
+                              {c.max_days_late}d late
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {/* In-place expansion — a row of its own, directly under
+                          the customer it belongs to, not a section rendered
+                          after the whole table. `colSpan` matches the 6
+                          columns above so the panel spans the full table
+                          width rather than sitting in just the first cell. */}
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={6} className="py-2">
+                            <CustomerBillingPanel
+                              params={effectiveParams}
+                              customerId={c.customer_id}
+                              customerName={c.company_name}
+                              onClose={() => setDrillCustomer(null)}
+                            />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="py-2 text-right">{c.approved_quotes}</td>
-                    <td className="py-2 text-right">{kwd(c.billed_kwd)}</td>
-                    <td className="py-2 text-right whitespace-nowrap">
-                      <Delta
-                        value={c.trendPct}
-                        current={c.billed_kwd}
-                        compareTitle={compareLabel(d.meta)}
-                      />
-                    </td>
-                    <td className="py-2 text-right">
-                      {c.collectedPct == null ? '—' : `${c.collectedPct}%`}
-                    </td>
-                    <td
-                      className={`py-2 text-right ${c.outstanding > 0 ? 'text-primary-600 font-semibold' : ''}`}
-                      title={c.max_days_late > 0 ? `Oldest unpaid invoice ${c.max_days_late}d past due` : undefined}
-                    >
-                      {kwd(c.outstanding)}
-                      {c.max_days_late > 0 && (
-                        <span className="block text-[9px] text-rose-500 font-normal leading-tight">
-                          {c.max_days_late}d late
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
-          {/* Expands directly beneath the ranking table it was opened from. */}
-          {drillCustomer && (
-            <CustomerBillingPanel
-              params={effectiveParams}
-              customerId={drillCustomer.customer_id}
-              customerName={drillCustomer.company_name}
-              onClose={() => setDrillCustomer(null)}
-            />
-          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <MiniBars
@@ -3262,6 +3486,12 @@ export function MaintenanceCostSection({ params }) {
   const { yAxisWidth, labelMax } = useHorizontalBarAxis();
   // Purely local zoom on the already-fetched series — see useLocalZoom.
   const monthlyZoom = useLocalZoom(d?.series?.byMonth, 'month', cardRange);
+  // Each `byMonth` row already carries a dynamic per-issue-type cost key
+  // alongside `total` (the fetcher builds `total` FROM them) — unused here
+  // until now, same as dispatch trends' per-status keys were. Summarising
+  // whatever range is currently visible is therefore free: no new data, no
+  // fetch, just reading what the section already has in memory.
+  const monthlyRangeSummary = useMemo(() => summarizeMonthlyCostRange(monthlyZoom.data), [monthlyZoom.data]);
 
   const byUnit = d?.breakdowns?.byUnit;
   const chartRows = useMemo(
@@ -3322,6 +3552,26 @@ export function MaintenanceCostSection({ params }) {
               fromDate={monthLabel(monthlyZoom.zoomDomain?.from)}
               toDate={monthLabel(monthlyZoom.zoomDomain?.to)}
               onReset={monthlyZoom.resetZoom}
+              detail={monthlyRangeSummary && (
+                <div className="space-y-0.5">
+                  <p>
+                    {monthlyRangeSummary.months} month{monthlyRangeSummary.months === 1 ? '' : 's'}
+                    {' · '}{kwd(monthlyRangeSummary.total)} total
+                    {' · '}{kwd(monthlyRangeSummary.avgPerMonth)}/mo avg
+                    {monthlyRangeSummary.peakMonth && (
+                      <> · peak {kwd(monthlyRangeSummary.peakTotal)} in {monthLabel(monthlyRangeSummary.peakMonth)}</>
+                    )}
+                  </p>
+                  {monthlyRangeSummary.issueBreakdown.length > 0 && (
+                    <p className="text-primary-600">
+                      {monthlyRangeSummary.issueBreakdown
+                        .slice(0, 4)
+                        .map(([issue, cost]) => `${kwd(cost)} ${issue}`)
+                        .join(' · ')}
+                    </p>
+                  )}
+                </div>
+              )}
             />
             <ChartAnim
               animKey={monthlyZoom.animKey}
@@ -3334,7 +3584,29 @@ export function MaintenanceCostSection({ params }) {
                   <CartesianGrid strokeDasharray="3 4" stroke="rgba(148,163,184,0.18)" />
                   <XAxis dataKey="month" tick={{ fontSize: 10 }} minTickGap={8} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => v.toLocaleString()} />
-                  <Tooltip contentStyle={NEO_TOOLTIP_STYLE} formatter={(v) => kwd(v)} />
+                  {/* Per-issue-type cost (Electrical/Hydraulic/…) is already
+                      computed into every `byMonth` row to build `total` —
+                      surfacing it here is free, no new data. */}
+                  <Tooltip
+                    content={
+                      <NamedTooltip
+                        titleOf={(r) => monthLabel(r.month)}
+                        rows={(r) => {
+                          const skip = new Set(['month', 'total', 'jobs', 'avgCost', 'trailing3']);
+                          const issueKeys = Object.keys(r ?? {}).filter(k => !skip.has(k));
+                          return [
+                            { label: 'Total spend', value: kwd(r.total) },
+                            { label: '3-month average', value: kwd(r.trailing3) },
+                            ...issueKeys
+                              .filter(k => Number(r[k]) > 0)
+                              .sort((a, b) => Number(r[b]) - Number(r[a]))
+                              .slice(0, 5)
+                              .map(k => ({ label: k, value: kwd(r[k]) })),
+                          ];
+                        }}
+                      />
+                    }
+                  />
                   <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: 10 }} />
                   {/* Recharts' own animation is off — `ChartAnim` draws these
                       paths on with stroke-dashoffset (and wipes the fill),

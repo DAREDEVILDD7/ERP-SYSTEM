@@ -16,6 +16,9 @@ import { supabase } from '../lib/supabaseClient';
 import {
   typeName, unitLabel, coverage, confidenceFrom, deltaPct,
 } from '../lib/analyticsLabels';
+// Record-level quotation screening, shared with the Operational Dashboard so
+// there is exactly one definition of "this quote is wrong" in the codebase.
+import { screenQuotations, rankFlags } from '../lib/operationalAnomalies';
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
@@ -259,6 +262,69 @@ async function safeQuery(builder, tag) {
   }
 }
 
+// This project's PostgREST instance caps an unbounded select at 1000 rows —
+// measured directly against the live database, not assumed — and truncates
+// SILENTLY: no error, no warning, just a short result. Worse, a query with
+// no ORDER BY has no defined row order, and in practice PostgREST/Postgres
+// tend to return rows close to physical/insertion order, so the rows most
+// likely to fall off the truncated tail are the NEWEST ones — exactly where
+// a just-created anomalous quote or invoice lives. `getTopCustomers`'s
+// 365-day quotations window was already within 20 rows of this cliff, and
+// `quotation_items` (fed to revenue-by-category, unit P&L and most-rented)
+// had already silently crossed it.
+//
+// `PK_COLUMN` names, for every table `safeQueryAll` is asked to page, a
+// column that is unique per row — this codebase's `<domain>_id` primary-key
+// convention (see docs/database-schema.md). Pagination orders by it so page
+// N+1 starts exactly where page N ended: ordering by a non-unique column
+// (a date, a status) risks a row landing on both sides of a page boundary,
+// or neither, whenever two rows tie on it — which seeded data does often.
+export const PK_COLUMN = {
+  invoices: 'invoice_id',
+  quotations: 'quotation_id',
+  lease_invoices: 'lease_invoice_id',
+  quotation_items: 'item_id',
+};
+
+// Pages a query past the 1000-row cap. `buildPage` MUST be a FACTORY — a
+// function returning a FRESH query builder — never an already-built one:
+// a Supabase builder is a one-shot thenable that fires its network call the
+// moment it is awaited, so the same instance cannot be reused for a second
+// page. `pkColumn` must resolve through `PK_COLUMN`; passing anything else
+// is a programming error, not a runtime condition, so it throws immediately
+// rather than silently reintroducing the exact truncation this exists to
+// close.
+export async function safeQueryAll(buildPage, pkColumn, tag) {
+  if (!pkColumn) {
+    throw new Error(
+      `[analytics:${tag}] safeQueryAll called with no pkColumn — add this ` +
+      'table to PK_COLUMN in api/analytics.js so pagination can order ' +
+      'deterministically. Refusing to run unordered, since that would ' +
+      'silently reintroduce the 1000-row truncation this function exists ' +
+      'to close.'
+    );
+  }
+  const PAGE = 1000;
+  const rows = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await safeQuery(
+      buildPage().order(pkColumn, { ascending: true }).range(offset, offset + PAGE - 1),
+      `${tag}[${offset}]`
+    );
+    rows.push(...page);
+    if (page.length < PAGE) break;
+    // Safety net against spinning forever if a misbehaving backend always
+    // returns exactly PAGE rows. 200 pages is 200,000 rows — far beyond
+    // anything this app seeds or expects to hold live; hitting this means
+    // something is wrong with the query, not that more paging would help.
+    if (offset / PAGE >= 199) {
+      console.warn(`[analytics:${tag}] stopped after 200 pages (200,000 rows) — results may be incomplete`);
+      break;
+    }
+  }
+  return rows;
+}
+
 // Rows inside a window on a NULLABLE date column, without losing the rows
 // whose date is null.
 //
@@ -273,7 +339,7 @@ async function safeQuery(builder, tag) {
 //
 // `effective_date` is stamped on every row so callers bucket and sort on one
 // field without caring which query produced it.
-async function windowedRows(table, columns, opts) {
+export async function windowedRows(table, columns, opts) {
   const {
     primary, primaryFrom, primaryTo,
     fallback, fallbackFrom, fallbackTo,
@@ -283,12 +349,28 @@ async function windowedRows(table, columns, opts) {
     const q = supabase.from(table).select(columns);
     return typeof tune === 'function' ? tune(q) : q;
   };
+  // A table this helper is called with but that PK_COLUMN does not know is a
+  // caller bug, not something to fail on for every user of the page — it
+  // degrades to the OLD single-page behaviour (capped at 1000, same as
+  // before this fix) with a loud console.warn, so it is caught in
+  // development rather than silently under-counting in production.
+  const pk = PK_COLUMN[table];
+  if (!pk) {
+    console.warn(
+      `[analytics:windowedRows] "${table}" has no entry in PK_COLUMN (api/analytics.js) — ` +
+      'pagination disabled for this call; results are capped at the PostgREST row limit. ' +
+      `Add "${table}: '<its _id column>'" to PK_COLUMN.`
+    );
+  }
+  const runWindow = (buildFiltered, subtag) => (
+    pk ? safeQueryAll(buildFiltered, pk, `${tag}.${subtag}`) : safeQuery(buildFiltered(), `${tag}.${subtag}`)
+  );
   const [dated, undated] = await Promise.all([
-    safeQuery(build().gte(primary, primaryFrom).lte(primary, primaryTo), `${tag}.dated`),
+    runWindow(() => build().gte(primary, primaryFrom).lte(primary, primaryTo), 'dated'),
     fallback
-      ? safeQuery(
-        build().is(primary, null).gte(fallback, fallbackFrom).lte(fallback, fallbackTo),
-        `${tag}.undated`
+      ? runWindow(
+        () => build().is(primary, null).gte(fallback, fallbackFrom).lte(fallback, fallbackTo),
+        'undated'
       )
       : Promise.resolve([]),
   ]);
@@ -336,11 +418,28 @@ function daysBetween(a, b) {
 // a TypeError, in the middle of the aggregation, taking the whole section's
 // query down with it. Never name an optional option after an
 // `Object.prototype` member.
+// `buckets` used to default to a flat 8 regardless of window length, which
+// is the reason a drag-to-zoom on any "vs previous period" chart looked
+// broken: 30 days sliced into 8 buckets is ~3.75 days each, so dragging a
+// selection across a single week could only ever land inside 1-2 of those
+// already-blended buckets — there was no finer data left to reveal, because
+// the individual events were summed away on the SERVER, before this array
+// ever reached the browser. Zoom cannot invent detail that was discarded
+// upstream; it can only crop what it was given.
+//
+// The fix is here, not in the zoom code: default to ONE BUCKET PER DAY — the
+// finest granularity `dateOf` ever actually carries (a calendar date, never
+// a sub-day timestamp that matters for this comparison) — capped so a very
+// wide window (all-time) still renders as a readable chart rather than
+// hundreds of hairline points. A caller that genuinely needs a specific
+// bucket count can still pass one; none currently do, so every "vs previous
+// period" chart gets real daily resolution for free.
 function comparativeSeries(current, previous, {
-  days, buckets = 8, dateOf, sumOf = null,
+  days, buckets, dateOf, sumOf = null,
 } = {}) {
-  const n = Math.max(2, Math.min(24, Math.round(buckets) || 8));
   const win = Math.max(1, Number(days) || 1);
+  const requested = buckets != null ? Math.round(buckets) : Math.round(win);
+  const n = Math.max(2, Math.min(90, requested || 8));
   const span = (win * 86_400_000) / n;
   const now = Date.now();
   const startCur = now - win * 86_400_000;
@@ -488,11 +587,12 @@ export async function getMostRentedEquipment(params = {}) {
     );
     const quoteIds = quotes.map(q => q?.quotation_id).filter(Boolean);
     if (quoteIds.length) {
-      const qItems = await safeQuery(
-        supabase
+      const qItems = await safeQueryAll(
+        () => supabase
           .from('quotation_items')
           .select('quotation_id, equipment_id, quantity, equipment_units(equipment_id, serial_number, capacity, location, type_id, equipment_types(type_id, name, category))')
           .in('quotation_id', quoteIds),
+        PK_COLUMN.quotation_items,
         'mostRented.quotationItems'
       );
       const quoteById = new Map(quotes.filter(Boolean).map(q => [q.quotation_id, q]));
@@ -649,7 +749,7 @@ export async function getMostRentedEquipment(params = {}) {
     },
     series: {
       compare: comparativeSeries(events, prevDispatches, {
-        days, buckets: 8, dateOf: r => r.dispatch_date,
+        days, dateOf: r => r.dispatch_date,
       }),
     },
     breakdowns: {
@@ -956,9 +1056,17 @@ export async function getMostProcuredEquipment(params = {}) {
   for (const p of procs) {
     const m = (p.created_at ?? '').slice(0, 7); // YYYY-MM
     if (!m) continue;
-    if (!byMonth[m]) byMonth[m] = { month: m, Buy: 0, Lease: 0, Other: 0 };
+    if (!byMonth[m]) byMonth[m] = { month: m, Buy: 0, Lease: 0, Other: 0, spend: 0 };
     const bucket = ['Buy', 'Lease'].includes(p.type) ? p.type : 'Other';
     byMonth[m][bucket] += 1;
+    // `total_amount_kwd` was already selected for every row (the KPI totals
+    // above read it) — accumulating it per month too is the same "surface
+    // what's already fetched" fix the chart's zoom needed, not a new query.
+    // Voided procurements are excluded, matching every other spend figure
+    // this fetcher reports.
+    if (!['Cancelled', 'Rejected'].includes(p.status)) {
+      byMonth[m].spend += num(p.total_amount_kwd);
+    }
   }
 
   const totalCount = procs.length;
@@ -1004,7 +1112,9 @@ export async function getMostProcuredEquipment(params = {}) {
       countDeltaPct: deltaPct(totalCount, prevProcs.length),
     },
     series: {
-      byMonth: Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month)),
+      byMonth: Object.values(byMonth)
+        .map(r => ({ ...r, spend: Math.round(r.spend * 100) / 100 }))
+        .sort((a, b) => a.month.localeCompare(b.month)),
     },
     breakdowns: {
       byType: Object.values(byType).sort((a, b) => b.spend - a.spend),
@@ -1200,13 +1310,14 @@ export async function getMaintenanceFrequency(params = {}) {
     'maintFreq.jobs'
   );
 
-  const revenueItems = await safeQuery(
-    supabase
+  const revenueItems = await safeQueryAll(
+    () => supabase
       .from('quotation_items')
       .select('equipment_id, quantity, unit_rate_kwd, rental_start_date, rental_end_date')
       .not('equipment_id', 'is', null)
       .gte('rental_start_date', fromDate)
       .lte('rental_start_date', toDate),
+    PK_COLUMN.quotation_items,
     'maintFreq.revenue'
   );
   const revenueByUnit = new Map();
@@ -1560,7 +1671,7 @@ export async function getDispatchTrends(params = {}) {
     series: {
       daily,
       compare: comparativeSeries(rows, prevRows, {
-        days, buckets: 8, dateOf: r => r.effective_date,
+        days, dateOf: r => r.effective_date,
       }),
     },
     breakdowns: {
@@ -1730,7 +1841,7 @@ export async function getReturnTrends(params = {}) {
         .sort((a, b) => a.week.localeCompare(b.week)),
       byMonthLease: [...byMonthLease.entries()].map(([month, count]) => ({ month, count })).sort((a, b) => a.month.localeCompare(b.month)),
       compare: comparativeSeries(returns, prevReturns, {
-        days, buckets: 8, dateOf: r => r.return_date,
+        days, dateOf: r => r.return_date,
       }),
     },
     breakdowns: {
@@ -1937,11 +2048,12 @@ export async function getRevenueByCategory(params = {}) {
   const quotationIds = [...new Set(invoices.map(i => i.quotation_id).filter(Boolean))];
   let items = [];
   if (quotationIds.length) {
-    items = await safeQuery(
-      supabase
+    items = await safeQueryAll(
+      () => supabase
         .from('quotation_items')
         .select('quotation_id, equipment_id, total_kwd, unit_rate_kwd, quantity, equipment_units(equipment_id, capacity, equipment_types(type_id, name, category))')
         .in('quotation_id', quotationIds),
+      PK_COLUMN.quotation_items,
       'revByCat.items'
     );
   }
@@ -2044,11 +2156,12 @@ export async function getRevenueByCategory(params = {}) {
 
     const qIds = [...new Set(contracts.map(q => q?.quotation_id).filter(Boolean))];
     const qItems = qIds.length
-      ? await safeQuery(
-        supabase
+      ? await safeQueryAll(
+        () => supabase
           .from('quotation_items')
           .select('quotation_id, equipment_id, total_kwd, unit_rate_kwd, quantity, equipment_units(equipment_id, capacity, equipment_types(type_id, name, category))')
           .in('quotation_id', qIds),
+        PK_COLUMN.quotation_items,
         'revByCat.quotationItems'
       )
       : [];
@@ -2137,7 +2250,7 @@ export async function getRevenueByCategory(params = {}) {
     },
     series: {
       compare: comparativeSeries(invoices, prevInvoices, {
-        days, buckets: 8, dateOf: r => r.effective_date, sumOf: r => r.total_amount_kwd,
+        days, dateOf: r => r.effective_date, sumOf: r => r.total_amount_kwd,
       }),
     },
     breakdowns: {
@@ -2851,6 +2964,11 @@ export async function getTopCustomers(params = {}) {
   }
 
   // Ignore customers with zero activity in the window
+  // Screen every quotation in the window for record-level defects. This is
+  // pure and never throws (see lib/operationalAnomalies.js), so it cannot
+  // affect the customer ranking below even on wholly malformed input.
+  const quoteScreen = screenQuotations(quotations);
+
   const rows = [...map.values()]
     .filter(r => r.approved_quotes || r.billed_kwd)
     .map(r => ({
@@ -2947,8 +3065,21 @@ export async function getTopCustomers(params = {}) {
       worstDebtorName: withOutstanding[0]?.company_name ?? null,
       worstDebtorOutstanding: withOutstanding[0]?.outstanding ?? 0,
       churnedCount: rows.filter(r => r.is_churned).length,
-      // Zero-value quotes: active (non-cancelled, non-rejected) quotations
-      // with total_amount_kwd of 0 or null — data-quality signal.
+
+      // ── Data quality ────────────────────────────────────────────────
+      //
+      // Every quotation already fetched for this window is run through the
+      // shared record screener, so the Priority Signals ribbon can report
+      // bad rows without a query of its own.
+      //
+      // Two counts are kept because they answer different questions.
+      // `zeroValueQuoteCount` is the ACTIVE count — it excludes Cancelled
+      // and Rejected quotes, which is what a manager wants when asking
+      // "what is wrong in my live pipeline". `zeroValueTotalCount` is every
+      // zero-value quote in the window regardless of status, which is what
+      // a data-quality audit wants. Reporting only the first made the
+      // ribbon disagree with any raw count of the table, so both are
+      // exposed and the rule prints the one it means.
       zeroValueQuoteCount: quotations.filter(q =>
         !['Cancelled', 'Rejected'].includes(q.status) &&
         Number(q.total_amount_kwd ?? 0) === 0
@@ -2957,6 +3088,14 @@ export async function getTopCustomers(params = {}) {
         q.status === 'Approved' &&
         Number(q.total_amount_kwd ?? 0) === 0
       ).length,
+      zeroValueTotalCount: quoteScreen.stats.zeroValue,
+      negativeValueCount: quoteScreen.stats.negative,
+      missingValueCount: quoteScreen.stats.missingValue,
+      malformedDateCount: quoteScreen.stats.malformedDate,
+      duplicateQuoteCount: quoteScreen.stats.duplicate,
+      oversizedQuoteCount: quoteScreen.stats.oversized,
+      quotesScreened: quoteScreen.stats.total,
+      quotesExcluded: quoteScreen.stats.total - quoteScreen.stats.usable,
     },
     series: {
       // Revenue concentration curve: cumulative share against account rank.
@@ -2986,6 +3125,10 @@ export async function getTopCustomers(params = {}) {
       })(),
     },
     breakdowns: {
+      // The individual offending rows, ranked critical-first, so a drill-in
+      // can name the quote rather than only count it. Capped: the ribbon
+      // shows a headline, not a register.
+      dataQualityFlags: rankFlags(quoteScreen.flags).slice(0, 25),
       top20: rows.slice(0, 20).map(r => ({
         ...r,
         outstanding: Math.max(0, r.billed_kwd - r.paid_kwd),
@@ -3914,8 +4057,13 @@ export async function getUnitPnL(params = {}) {
   // on the parent quotation.status happens client-side after the join, since
   // a filter on the JOINED table via PostgREST syntax is more fragile than
   // it needs to be for a section that already reads defensively.
-  const quotationItems = await safeQuery(
-    supabase
+  // Unbounded below on rental_start_date (only an upper bound, `toDate`) and
+  // filtered to nothing narrower than "has an equipment_id" — of every raw
+  // query in this file, this one had the least protection against the
+  // 1000-row cap, and quotation_items had already crossed it. Paged via
+  // safeQueryAll rather than left as the single riskiest unbounded query.
+  const quotationItems = await safeQueryAll(
+    () => supabase
       .from('quotation_items')
       .select(
         'item_id, quotation_id, equipment_id, quantity, unit, unit_rate_kwd, rental_start_date, rental_end_date, ' +
@@ -3926,6 +4074,7 @@ export async function getUnitPnL(params = {}) {
       )
       .not('equipment_id', 'is', null)
       .lte('rental_start_date', toDate),
+    PK_COLUMN.quotation_items,
     'unitPnL.quotationItems'
   );
 

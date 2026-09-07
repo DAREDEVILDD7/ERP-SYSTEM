@@ -1,7 +1,11 @@
 // React Query wrapper for the Analytics page. Each section key maps to a
 // specific fetch function in api/analytics.js and its own stale time
-// (§3.3 of docs/AI-Analytics-Design.md). One section subscribes to live
-// realtime updates (§4.10 idle-vs-active); everything else relies on
+// (§3.3 of docs/AI-Analytics-Design.md). Two sections subscribe to live
+// realtime updates — idle_vs_active (§4.10) and top_customers, added so the
+// Priority Signals ribbon's data-quality rules (zero/negative/missing-value
+// quotes, computed inside getTopCustomers) react to a newly created
+// anomalous quotation within the debounce window instead of waiting out
+// top_customers's 30-minute stale time. Everything else relies on
 // stale-time-driven refetching so we do not over-consume the Supabase
 // realtime quota.
 
@@ -41,7 +45,7 @@ export const SECTIONS = {
   revenue_by_category:    { fetch: getRevenueByCategory,       stale:  5 * MINUTE, defaultParams: { days: 90 }  },
   procurement_vs_lease:   { fetch: getProcurementVsLease,      stale: 30 * MINUTE, defaultParams: { days: 365 } },
   idle_vs_active:         { fetch: getIdleVsActive,            stale:      MINUTE, defaultParams: {}, realtime: ['equipment_units'] },
-  top_customers:          { fetch: getTopCustomers,            stale: 30 * MINUTE, defaultParams: { days: 365 } },
+  top_customers:          { fetch: getTopCustomers,            stale: 30 * MINUTE, defaultParams: { days: 365 }, realtime: ['quotations'] },
   maintenance_cost:       { fetch: getMaintenanceCostTrends,   stale: 15 * MINUTE, defaultParams: { days: 365 } },
   monthly_kpis:           { fetch: getMonthlyKPIs,             stale:  5 * MINUTE, defaultParams: {}            },
   unit_pnl:               { fetch: getUnitPnL,                  stale: 15 * MINUTE, defaultParams: { days: 90 }  },

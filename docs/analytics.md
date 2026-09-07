@@ -163,6 +163,72 @@ The count is disclosed as `meta.undatedCount` rather than folded in
 silently — "we dispatched on that day" and "the record was raised on
 that day" are different claims.
 
+## PostgREST's silent 1000-row cap — use `safeQueryAll()` / `PK_COLUMN`
+
+Measured directly against the live Supabase project, not assumed: an
+unbounded `select()` with no `.range()` returns **at most 1000 rows**, with
+no error and no warning — the response is just short. Worse, with no
+`ORDER BY` the row order is whatever the query planner visits, which in
+practice tracks physical/insertion order, so the rows most likely to fall
+off the truncated tail are the **newest** ones. `quotation_items` had
+already crossed the cliff (1004 rows in the table, 1000 returned) and
+`quotations` was inside 20 rows of it — the exact table
+`getTopCustomers` windows to power the Priority Signals data-quality rules,
+meaning a newly created zero-value quote could silently stop being detected
+the moment the table passed 1000 rows in the window.
+
+`safeQueryAll(buildPage, pkColumn, tag)` pages past it: it calls `buildPage`
+(a **factory**, not an already-built query — a Supabase builder is a
+one-shot thenable and cannot be re-awaited for a second page) with
+`.order(pkColumn).range(offset, offset + 999)` in a loop until a page comes
+back shorter than 1000. `pkColumn` must be a column that is unique per row —
+`PK_COLUMN` maps each table to its `<domain>_id` primary key
+(`quotations` → `quotation_id`, `invoices` → `invoice_id`, `lease_invoices` →
+`lease_invoice_id`, `quotation_items` → `item_id`) — ordering by a
+non-unique column (a date, a status) risks a row landing on both sides of a
+page boundary, or neither, whenever two rows tie on it, which seeded data
+does often.
+
+`windowedRows()` uses it internally for every table it is given, and every
+raw `quotation_items` query that could plausibly cross 1000 rows
+(`getMostRentedEquipment`, `getMaintenanceFrequency`, both paths in
+`getRevenueByCategory`, `getUnitPnL`) was converted to it directly.
+
+**A table with no `PK_COLUMN` entry does not throw** — `windowedRows`
+degrades to the old single-page behaviour (capped at 1000, exactly as
+before this fix) with a loud `console.warn`, so a new call site that forgets
+to register its table is caught in development rather than silently
+under-counting in production. Calling `safeQueryAll` directly with no
+`pkColumn` at all **does** throw — that path has no caller to fall back to,
+so a missing primary key there is unambiguously a programming error.
+
+Verified by `scripts/verify_row_pagination.mjs`: runs the real
+`getTopCustomers` and `getRevenueByCategory` against a fake Supabase client
+holding 1,050 and 1,200 rows respectively, with a marker set of zero-value
+quotes placed deliberately in the last 20 rows by insertion order —
+reproducing "a KWD 0 quote is created after the table has already grown
+past the cap" exactly, and asserting every one of those rows is still
+individually named in `breakdowns.dataQualityFlags`, not just counted.
+Also covers the exact-1000-rows boundary, an unmapped table's degrade path,
+and a static check that every table `windowedRows` is called with (parsed
+out of the real source, not hand-copied) has a `PK_COLUMN` entry.
+
+## The Priority Signals ribbon reacts to new quotes within a debounce, not a 30-minute stale time
+
+`top_customers` — which feeds the four quote data-quality rules — has a
+30-minute `staleTime` (`useAnalytics.js`), matching how expensive the
+underlying 365-day, three-table query is. Left as the only signal, a
+quotation created during a live demo would not show up on the ribbon for up
+to half an hour with no indication anything was wrong.
+
+`quotations` is already in the Supabase realtime publication
+(`enable_realtime.sql`), so `top_customers` now also carries
+`realtime: ['quotations']`, mirroring the existing `idle_vs_active` →
+`equipment_units` pattern (§4.10). Any insert/update/delete on `quotations`
+invalidates and refetches `top_customers` after `useRealtimeRefresh`'s
+600ms debounce — so a newly created KWD 0 quote reaches the ribbon within
+about a second, not up to 30 minutes later.
+
 ## Status filters must be a DENY-list
 
 Revenue was filtered with `.in('status', ['Sent','Paid','Partial'])`,

@@ -49,6 +49,20 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Mobile main content: clear the fixed bottom nav (56px) plus iOS home-indicator inset.
+   max() keeps the legacy 80px floor on devices with no safe-area-inset (Android, older iPhones).
+   This rule lives after @tailwind utilities so it overrides Tailwind's pb-* classes on mobile. */
+@media (max-width: 767px) {
+  .mobile-content-pb {
+    padding-bottom: max(5rem, calc(3.5rem + env(safe-area-inset-bottom, 0px) + 1rem)) !important;
+  }
+}
+
+/* Hide the thin horizontal scrollbar on the Analytics category-tab strip on mobile.
+   The pb-1 class keeps the tap target, but the bar itself is visual noise. */
+.tabs-scroll::-webkit-scrollbar { display: none; }
+.tabs-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* ── Aurora glass design system ──────────────────────────────────────────── */
 :root {
   --glass:          rgba(255, 255, 255, 0.68);

@@ -33,8 +33,10 @@ export default function Layout() {
       {/* Main content */}
       <div className="flex flex-col flex-1 overflow-hidden">
         <Navbar title={title} />
-        {/* pb-16 on mobile to avoid content hiding behind bottom nav */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
+        {/* mobile-content-pb: overrides pb-20 on mobile with a safe-area-aware value
+            (nav height + env(safe-area-inset-bottom) + breathing room).
+            md:pb-6 covers desktop where there is no bottom nav. */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6 mobile-content-pb">
           {/* The one Suspense boundary for every code-split page (see App.js).
               It sits INSIDE <main>, below the sidebar and navbar, so a chunk
               fetch shows an in-content spinner instead of tearing down the

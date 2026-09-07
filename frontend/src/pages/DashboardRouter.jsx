@@ -5,6 +5,7 @@ import SuperAdminDashboard from '../components/dashboard/SuperAdminDashboard';
 import AdminDashboard      from '../components/dashboard/AdminDashboard';
 import SalesDashboard      from '../components/dashboard/SalesDashboard';
 import OperationsDashboard from '../components/dashboard/OperationsDashboard';
+import OperationalDashboard from '../components/dashboard/OperationalDashboard';
 import DispatchDashboard   from '../components/dashboard/DispatchDashboard';
 import WarehouseDashboard  from '../components/dashboard/WarehouseDashboard';
 import FinanceDashboard    from '../components/dashboard/FinanceDashboard';
@@ -20,18 +21,26 @@ import { ShieldCheck, LayoutDashboard } from 'lucide-react';
 // is unaffected by this key entirely.
 const SUPER_ADMIN_VIEW_KEY = 'jtc_super_admin_dashboard_view';
 
+// The Operational Dashboard is now the landing view: it answers "how is the
+// business running" before "is the platform healthy", which is the order a
+// Super Admin actually reads them in. The System Dashboard keeps its tab and
+// its behaviour - only the order and the default changed. Note the polarity
+// flip: the stored value is now checked for 'system' (the non-default),
+// so an old session that stored 'system' still restores System, and every
+// other stored value - including the legacy 'operations' - lands on
+// Operational, which is where the default should put it anyway.
 function loadSuperAdminView() {
   try {
-    return sessionStorage.getItem(SUPER_ADMIN_VIEW_KEY) === 'operations' ? 'operations' : 'system';
+    return sessionStorage.getItem(SUPER_ADMIN_VIEW_KEY) === 'system' ? 'system' : 'operations';
   } catch (_) {
-    return 'system'; // storage disabled / privacy mode - default landing still applies
+    return 'operations'; // storage disabled / privacy mode - default landing still applies
   }
 }
 
 export default function DashboardRouter() {
   const { role, loading } = useAuth();
-  // Lazily evaluated once, in useState - default is 'system' (the required
-  // landing dashboard), restored from the current session if the Super
+  // Lazily evaluated once, in useState - default is 'operations' (the
+  // required landing dashboard), restored from the current session if the Super
   // Admin already switched views earlier in this tab. Declared
   // unconditionally (before the loading/role checks below) per the Rules of
   // Hooks; it is simply unused for every non-Super-Admin role.
@@ -49,8 +58,8 @@ export default function DashboardRouter() {
       <div className="space-y-4">
         <div className="flex gap-1 border-b border-gray-100">
           {[
-            { key: 'system',     label: 'System Dashboard',     icon: ShieldCheck },
-            { key: 'operations', label: 'Operations Dashboard', icon: LayoutDashboard },
+            { key: 'operations', label: 'Operational Dashboard', icon: LayoutDashboard },
+            { key: 'system',     label: 'System Dashboard',      icon: ShieldCheck },
           ].map(t => (
             <button
               key={t.key}
@@ -64,11 +73,12 @@ export default function DashboardRouter() {
           ))}
         </div>
 
-        {/* Operations Dashboard reuses AdminDashboard - the broadest existing
-            operational overview - unchanged, exactly as every other role's
+        {/* OperationalDashboard renders the trend / forecast / anomaly
+            surfaces and then embeds AdminDashboard - the broadest existing
+            operational snapshot - unchanged, exactly as every other role's
             dashboard below. Super Admin never loses access to either view;
             switching is instant and client-side only. */}
-        {superAdminView === 'system' ? <SuperAdminDashboard /> : <AdminDashboard />}
+        {superAdminView === 'system' ? <SuperAdminDashboard /> : <OperationalDashboard />}
       </div>
     );
   }
